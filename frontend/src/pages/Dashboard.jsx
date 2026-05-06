@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS, USER_INFO_KEY, USER_ROLE_KEY } from "../constants.js";
 import { dishSaveErrorMessage } from "../utils/apiError.js";
 import { formatConfidencePercentDisplay } from "../utils/confidence.js";
-import { detectDish, UNKNOWN_DISH_TEXT } from "../services/detectDishService.js";
+import { useDetectDish } from "../hooks/useDetectDish.js";
 import {
   formatSaudiDateLine,
   formatSaudiDateTime,
@@ -425,6 +425,15 @@ export default function Dashboard() {
   const [monitoringLastAnalyzedAt, setMonitoringLastAnalyzedAt] = useState(null);
   const [monitoringCameraSelectId, setMonitoringCameraSelectId] = useState("");
   const [monitoringResolveLoadingId, setMonitoringResolveLoadingId] = useState(null);
+
+  const { handleDetectDish } = useDetectDish({
+    accessTokenKey: ACCESS_TOKEN_KEY,
+    setDetecting,
+    setDishNotice,
+    setDetectResult,
+    setSelectedAlternative,
+    setManualDish,
+  });
 
   useEffect(() => {
     if (!selectedImage) {
@@ -1325,59 +1334,6 @@ export default function Dashboard() {
     setSelectedImage(file);
     closeCaptureModal();
     void handleDetectDish(file);
-  }
-
-  async function handleDetectDish(file, opts = {}) {
-    const preserveManual = Boolean(opts.preserveManual);
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (!token || !file) return;
-    setDetecting(true);
-    setDishNotice({ type: "info", text: "جاري تحليل الصورة باستخدام الذكاء الاصطناعي..." });
-    setDetectResult(null);
-    setSelectedAlternative("");
-    if (!preserveManual) setManualDish("");
-    try {
-      const result = await detectDish(token, file);
-      if (!result.ok) {
-        console.error("detect-dish failed:", { status: result.status, body: result.body });
-        if (result.status === 401) {
-          setDishNotice({ type: "error", text: "انتهت الجلسة — سجّل الدخول مجددًا ثم أعد المحاولة." });
-        } else {
-          setDishNotice({ type: "error", text: "تعذر التعرف على الطبق، يرجى الاختيار يدويًا" });
-        }
-        return;
-      }
-      const normalized = result.normalized;
-      const autofillDishName =
-        normalized.suggestions[0]?.name ||
-        (normalized.detected === UNKNOWN_DISH_TEXT && normalized.suggestedName
-          ? normalized.suggestedName
-          : normalized.alternatives[0] || normalized.detected);
-      setDetectResult(normalized);
-      const skipAutofill = normalized.proteinConflict || normalized.needsReviewLowConf;
-      if (skipAutofill) {
-        setSelectedAlternative("");
-        setManualDish("");
-        setDishNotice({
-          type: "warning",
-          text: normalized.proteinConflict
-            ? "تعارض بين الاقتراحات (مثل سمك ولحم أو سمك ودجاج). اختر أحد الخيارات أو اكتب الاسم يدويًا — لم يُملأ الحقل تلقائيًا."
-            : "ثقة الاقتراح أقل من 75%. اختر أحد الخيارات أو اكتب اسم الطبق يدويًا — لم يُملأ الحقل تلقائيًا.",
-        });
-      } else {
-        setSelectedAlternative(autofillDishName);
-        setManualDish(autofillDishName);
-        setDishNotice({
-          type: "success",
-          text: `تم التعرف على الطبق: ${autofillDishName}`,
-        });
-      }
-    } catch (err) {
-      console.error("detect-dish request error:", err);
-      setDishNotice({ type: "error", text: "تعذر التعرف على الطبق، يرجى الاختيار يدويًا" });
-    } finally {
-      setDetecting(false);
-    }
   }
 
   async function submitDishRecord() {
