@@ -14,6 +14,7 @@ import {
 } from "../utils/dishRecordsDisplay.js";
 import { staffAvatarInitials, staffWelcomeDisplayName } from "../utils/avatarInitials.js";
 import DashboardNav from "../components/navigation/DashboardNav.jsx";
+import Toast from "../components/shared/Toast.jsx";
 import DishDocSection from "../components/dish/DishDocSection.jsx";
 import DishFilters from "../components/dish/DishFilters.jsx";
 import RecordsList from "../components/dish/RecordsList.jsx";
@@ -2348,20 +2349,7 @@ export default function Dashboard() {
               </div>
             ) : null}
 
-            {toast ? (
-              <div
-                className={`pointer-events-none fixed start-3 end-3 top-20 z-[200] rounded-xl border px-3 py-3 text-sm font-medium shadow-xl backdrop-blur-md sm:start-4 sm:end-auto sm:top-24 sm:max-w-sm ${
-                  toast.type === "success"
-                    ? "border-accent-green/40 bg-emerald-950/90 text-emerald-100"
-                    : toast.type === "error"
-                      ? "border-accent-red/40 bg-red-950/90 text-red-100"
-                      : "border-brand-sky/40 bg-[#0B1327]/95 text-brand-sky"
-                }`}
-                role="status"
-              >
-                {toast.text}
-              </div>
-            ) : null}
+            <Toast toast={toast} />
 
             {deleteTarget ? (
               <div
@@ -3140,20 +3128,7 @@ export default function Dashboard() {
           </>
         )}
 
-        {role !== "staff" && toast ? (
-          <div
-            className={`pointer-events-none fixed start-3 end-3 top-20 z-[200] rounded-xl border px-3 py-3 text-sm font-medium shadow-xl backdrop-blur-md sm:start-4 sm:end-auto sm:top-24 sm:max-w-sm ${
-              toast.type === "success"
-                ? "border-accent-green/40 bg-emerald-950/90 text-emerald-100"
-                : toast.type === "error"
-                  ? "border-accent-red/40 bg-red-950/90 text-red-100"
-                  : "border-brand-sky/40 bg-[#0B1327]/95 text-brand-sky"
-            }`}
-            role="status"
-          >
-            {toast.text}
-          </div>
-        ) : null}
+        {role !== "staff" ? <Toast toast={toast} /> : null}
 
         {rejectTarget ? (
           <div
