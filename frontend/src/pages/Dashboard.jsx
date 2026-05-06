@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS, USER_INFO_KEY, USER_ROLE_KEY } from "../constants.js";
+import { Link, useLocation } from "react-router-dom";
+import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS } from "../constants.js";
 import { dishSaveErrorMessage } from "../utils/apiError.js";
 import { formatConfidencePercentDisplay } from "../utils/confidence.js";
 import { useDetectDish } from "../hooks/useDetectDish.js";
-import { deleteDishRecord, fetchDishRecords, saveDishRecord, updateDishRecord } from "../services/dishRecordService.js";
+import { useDishRecords } from "../hooks/useDishRecords.js";
+import { useDashboardAuth } from "../hooks/useDashboardAuth.js";
+import { useToastStore } from "../stores/useToastStore.js";
 import {
   formatSaudiDateLine,
   formatSaudiDateTime,
@@ -331,7 +333,6 @@ function toStaffRecord(item, meta = {}) {
 }
 
 export default function Dashboard() {
-  const navigate = useNavigate();
   const location = useLocation();
   const committedBlobUrlsRef = useRef(new Set());
   const dishFileInputRef = useRef(null);
@@ -346,11 +347,6 @@ export default function Dashboard() {
   const supervisorReviewsRef = useRef(null);
   const supervisorReportsRef = useRef(null);
   const supervisorEmployeesRef = useRef(null);
-  const [role, setRole] = useState(localStorage.getItem(USER_ROLE_KEY) || "");
-  const [staffRecords, setStaffRecords] = useState([]);
-  const [staffRecordsLoading, setStaffRecordsLoading] = useState(false);
-  const [staffRecordsLastUpdated, setStaffRecordsLastUpdated] = useState("");
-  const [staffCount, setStaffCount] = useState(0);
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedPreviewUrl, setSelectedPreviewUrl] = useState("");
   const [captureModalOpen, setCaptureModalOpen] = useState(false);
@@ -363,9 +359,10 @@ export default function Dashboard() {
   const [manualDish, setManualDish] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [sourceEntity, setSourceEntity] = useState("");
-  const [saveLoading, setSaveLoading] = useState(false);
   const [dishNotice, setDishNotice] = useState(null);
-  const [toast, setToast] = useState(null);
+  const toast = useToastStore((s) => s.toast);
+  const setToast = useToastStore((s) => s.setToast);
+  const clearToast = useToastStore((s) => s.clearToast);
   const [highlightRawId, setHighlightRawId] = useState(null);
   const [filterSearch, setFilterSearch] = useState("");
   const [filterDishType, setFilterDishType] = useState("");
@@ -379,9 +376,7 @@ export default function Dashboard() {
   const [sortKey, setSortKey] = useState("newest");
   const [editingRecord, setEditingRecord] = useState(null);
   const [editForm, setEditForm] = useState({ label: "", quantity: 1, source: "" });
-  const [editSaving, setEditSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
   const [supervisorSummary, setSupervisorSummary] = useState(null);
   const [supervisorSummaryLoading, setSupervisorSummaryLoading] = useState(false);
   const [supervisorEmployees, setSupervisorEmployees] = useState([]);
@@ -425,6 +420,7 @@ export default function Dashboard() {
   const [monitoringLastAnalyzedAt, setMonitoringLastAnalyzedAt] = useState(null);
   const [monitoringCameraSelectId, setMonitoringCameraSelectId] = useState("");
   const [monitoringResolveLoadingId, setMonitoringResolveLoadingId] = useState(null);
+  const { role, getAccessToken, logout, handleProtectedAuthFailure } = useDashboardAuth({ setToast });
 
   const { handleDetectDish } = useDetectDish({
     accessTokenKey: ACCESS_TOKEN_KEY,
@@ -433,6 +429,30 @@ export default function Dashboard() {
     setDetectResult,
     setSelectedAlternative,
     setManualDish,
+  });
+  const {
+    staffRecords,
+    staffRecordsLoading,
+    staffRecordsLastUpdated,
+    staffCount,
+    saveLoading,
+    editSaving,
+    deleteLoading,
+    reloadStaffDishes,
+    saveDishEntry,
+    saveEditedDishRecord,
+    confirmDeleteDishRecord,
+  } = useDishRecords({
+    accessTokenKey: ACCESS_TOKEN_KEY,
+    committedBlobUrlsRef,
+    toStaffRecord,
+    formatSaudiTimeLine,
+    dishSaveErrorMessage,
+    setToast,
+    setDishNotice,
+    setHighlightRawId,
+    setEditingRecord,
+    setDeleteTarget,
   });
 
   useEffect(() => {
@@ -469,13 +489,13 @@ export default function Dashboard() {
       blobUrlSet.forEach((u) => URL.revokeObjectURL(u));
       blobUrlSet.clear();
     };
-  }, []);
+  }, [getAccessToken]);
 
   useEffect(() => {
     if (!toast) return undefined;
-    const t = setTimeout(() => setToast(null), 4200);
+    const t = setTimeout(() => clearToast(), 4200);
     return () => clearTimeout(t);
-  }, [toast]);
+  }, [toast, clearToast]);
 
   useEffect(() => {
     if (highlightRawId == null) return undefined;
@@ -490,7 +510,7 @@ export default function Dashboard() {
     }
     mq.addEventListener("change", closeNav);
     return () => mq.removeEventListener("change", closeNav);
-  }, []);
+  }, [getAccessToken]);
 
   useEffect(() => {
     if (role !== "staff") return undefined;
@@ -521,7 +541,7 @@ export default function Dashboard() {
     );
     nodes.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [role]);
+  }, [getAccessToken, handleProtectedAuthFailure, role]);
 
   useEffect(() => {
     if (!(role === "supervisor" || role === "admin")) return undefined;
@@ -565,7 +585,7 @@ export default function Dashboard() {
     );
     nodes.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [role]);
+  }, [getAccessToken, handleProtectedAuthFailure, role]);
 
   useEffect(() => {
     if (!(role === "supervisor" || role === "admin")) return undefined;
@@ -590,7 +610,7 @@ export default function Dashboard() {
   }, [role]);
 
   const loadCurrentStaffUser = useCallback(async () => {
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) {
       setStaffMe(null);
       return null;
@@ -624,7 +644,7 @@ export default function Dashboard() {
     } finally {
       setStaffProfileLoading(false);
     }
-  }, []);
+  }, [getAccessToken]);
 
   useEffect(() => {
     if (role !== "staff") {
@@ -695,57 +715,6 @@ export default function Dashboard() {
     setFilterStatus("all");
     setQuickPreset(null);
     setSortKey("newest");
-  }
-
-  useEffect(() => {
-    const localRole = localStorage.getItem(USER_ROLE_KEY);
-    if (localRole) {
-      setRole(localRole);
-      return;
-    }
-
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (!token) return;
-
-    (async () => {
-      for (const url of CURRENT_USER_ME_URLS) {
-        try {
-          const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-          const body = await r.json().catch(() => ({}));
-          if (r.ok && body?.role) {
-            localStorage.setItem(USER_ROLE_KEY, body.role);
-            setRole(body.role);
-            return;
-          }
-        } catch {
-          /* try next */
-        }
-      }
-    })();
-  }, []);
-
-  function logout() {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(USER_ROLE_KEY);
-    localStorage.removeItem(USER_INFO_KEY);
-    navigate("/login", { replace: true });
-  }
-
-  function handleProtectedAuthFailure(status, detail) {
-    if (status === 401) {
-      setToast({ type: "error", text: "انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى" });
-      logout();
-      return true;
-    }
-    if (status === 403) {
-      setToast({ type: "error", text: "ليس لديك صلاحية للوصول لهذه الصفحة" });
-      return true;
-    }
-    if (typeof detail === "string" && detail.includes("لم يتم تحديد الفرع")) {
-      setToast({ type: "error", text: "لم يتم تحديد الفرع لهذا الحساب" });
-      return true;
-    }
-    return false;
   }
 
   const dashboardTitle = useMemo(() => {
@@ -836,7 +805,7 @@ export default function Dashboard() {
 
   const loadSupervisorSummary = useCallback(async () => {
     if (!(role === "supervisor" || role === "admin")) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setSupervisorSummaryLoading(true);
     try {
@@ -854,11 +823,11 @@ export default function Dashboard() {
     } finally {
       setSupervisorSummaryLoading(false);
     }
-  }, [role]);
+  }, [getAccessToken, handleProtectedAuthFailure, role]);
 
   const loadSupervisorEmployees = useCallback(async () => {
     if (!(role === "supervisor" || role === "admin")) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setSupervisorEmployeesLoading(true);
     try {
@@ -883,11 +852,11 @@ export default function Dashboard() {
     } finally {
       setSupervisorEmployeesLoading(false);
     }
-  }, [role, employeeFilters]);
+  }, [employeeFilters, getAccessToken, handleProtectedAuthFailure, role]);
 
   const loadSupervisorReviews = useCallback(async () => {
     if (!(role === "supervisor" || role === "admin")) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setReviewLoading(true);
     try {
@@ -925,11 +894,11 @@ export default function Dashboard() {
     } finally {
       setReviewLoading(false);
     }
-  }, [role, reviewFilters]);
+  }, [getAccessToken, handleProtectedAuthFailure, reviewFilters, role, setToast]);
 
   const loadSupervisorCameras = useCallback(async () => {
     if (!(role === "supervisor" || role === "admin")) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setCameraCardsLoading(true);
     try {
@@ -947,11 +916,11 @@ export default function Dashboard() {
     } finally {
       setCameraCardsLoading(false);
     }
-  }, [role]);
+  }, [getAccessToken, handleProtectedAuthFailure, role]);
 
   const loadSupervisorAlerts = useCallback(async () => {
     if (!(role === "supervisor" || role === "admin")) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     try {
       const res = await fetch(SUPERVISOR_ALERTS_URL, { headers: { Authorization: `Bearer ${token}` } });
@@ -968,7 +937,7 @@ export default function Dashboard() {
     } catch {
       setAlertsList([]);
     }
-  }, [role]);
+  }, [getAccessToken, handleProtectedAuthFailure, role]);
 
   useEffect(() => {
     if (location.pathname !== "/monitoring") return;
@@ -1001,7 +970,7 @@ export default function Dashboard() {
   }, [role, loadSupervisorCameras, loadSupervisorAlerts]);
 
   async function approveReviewRecord(record) {
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setReviewActionLoadingId(record.id);
     try {
@@ -1028,7 +997,7 @@ export default function Dashboard() {
 
   async function confirmRejectReviewRecord() {
     if (!rejectTarget || !rejectReason.trim()) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setReviewActionLoadingId(rejectTarget.id);
     try {
@@ -1061,7 +1030,7 @@ export default function Dashboard() {
 
   async function submitEditApproveReviewRecord() {
     if (!editApproveTarget || !editApproveForm.dishName.trim()) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setReviewActionLoadingId(editApproveTarget.id);
     try {
@@ -1097,7 +1066,7 @@ export default function Dashboard() {
 
   async function analyzeMonitoringFrameUpload() {
     if (!(role === "supervisor" || role === "admin")) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token || !cameraTestFile) {
       setToast({ type: "error", text: "يرجى اختيار صورة للتحليل." });
       return;
@@ -1157,7 +1126,7 @@ export default function Dashboard() {
   }
 
   async function resolveMonitoringAlert(alertId) {
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token) return;
     setMonitoringResolveLoadingId(alertId);
     try {
@@ -1180,7 +1149,7 @@ export default function Dashboard() {
   }
 
   async function addSupervisorCamera() {
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const token = getAccessToken();
     if (!token || !newCameraForm.name.trim() || !newCameraForm.location.trim()) return;
     try {
       const res = await fetch(SUPERVISOR_CAMERAS_URL, {
@@ -1205,26 +1174,6 @@ export default function Dashboard() {
       setToast({ type: "error", text: "تعذر إضافة الكاميرا." });
     }
   }
-
-  const reloadStaffDishes = useCallback(async () => {
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (!token) return;
-    setStaffRecordsLoading(true);
-    try {
-      const result = await fetchDishRecords({ token });
-      if (!result.ok) return;
-      committedBlobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
-      committedBlobUrlsRef.current.clear();
-      const mapped = result.data.map((row) => toStaffRecord(row));
-      setStaffRecords(mapped);
-      setStaffCount(mapped.length);
-      setStaffRecordsLastUpdated(formatSaudiTimeLine(new Date()));
-    } catch {
-      /* ignore */
-    } finally {
-      setStaffRecordsLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     if (role !== "staff") return;
@@ -1337,8 +1286,6 @@ export default function Dashboard() {
       setDishNotice({ type: "error", text: "يرجى رفع صورة أولًا." });
       return;
     }
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (!token) return;
     if (detectResult?.proteinConflict) {
       const pick = manualDish.trim() || selectedAlternative.trim();
       if (!pick) {
@@ -1363,74 +1310,48 @@ export default function Dashboard() {
       });
       return;
     }
-    setSaveLoading(true);
-    setDishNotice(null);
+    let imageDataUrl;
     try {
-      let imageDataUrl;
-      try {
-        imageDataUrl = await readImageFileAsDataURL(selectedImage);
-      } catch {
-        setDishNotice({ type: "error", text: "تعذر قراءة ملف الصورة. أعد المحاولة." });
-        return;
-      }
-      if (imageDataUrl.length > DISH_IMAGE_DATA_URL_MAX_CHARS) {
-        setDishNotice({
-          type: "error",
-          text: "صورة الطبق كبيرة جدًا. جرّب صورة أصغر أو أقل دقة ثم احفظ مجددًا.",
-        });
-        return;
-      }
-      const predictedFromAi =
-        detectResult?.suggestions?.[0]?.name ||
-        detectResult?.detected ||
-        manualDish.trim() ||
-        "طبق غير معروف";
-      const saveResult = await saveDishRecord({
-        token,
-        imageDataUrl,
-        predictedFromAi,
-        confirmed,
-        quantityValue: positiveIntQuantity(quantity),
-        sourceEntity,
-        staffMe,
-      });
-      if (!saveResult.ok) {
-        console.error("[dish save] failed", {
-          status: saveResult.status,
-          payload: saveResult.payload,
-          responseBody: saveResult.body,
-        });
-        setDishNotice({ type: "error", text: dishSaveErrorMessage(saveResult.status, saveResult.body) });
-        return;
-      }
-      setToast({
-        type: "success",
-        text: "تم حفظ الطبق وإرساله للمراجعة",
-      });
-      setDishNotice(null);
-      const savedId = saveResult.data?.id;
-      await reloadStaffDishes();
-      if (savedId != null) {
-        setHighlightRawId(savedId);
-        requestAnimationFrame(() => {
-          document.getElementById(`dish-row-${savedId}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        });
-      }
-      setSelectedImage(null);
-      setDetectResult(null);
-      setSelectedAlternative("");
-      setManualDish("");
-      setQuantity(1);
-      setSourceEntity("");
-    } catch (err) {
-      console.error("[dish save] network or parse error", err);
+      imageDataUrl = await readImageFileAsDataURL(selectedImage);
+    } catch {
+      setDishNotice({ type: "error", text: "تعذر قراءة ملف الصورة. أعد المحاولة." });
+      return;
+    }
+    if (imageDataUrl.length > DISH_IMAGE_DATA_URL_MAX_CHARS) {
       setDishNotice({
         type: "error",
-        text: "تعذر الاتصال بالخادم أو قراءة الاستجابة. تحقق من تشغيل الـ backend والشبكة.",
+        text: "صورة الطبق كبيرة جدًا. جرّب صورة أصغر أو أقل دقة ثم احفظ مجددًا.",
       });
-    } finally {
-      setSaveLoading(false);
+      return;
     }
+    const predictedFromAi =
+      detectResult?.suggestions?.[0]?.name ||
+      detectResult?.detected ||
+      manualDish.trim() ||
+      "طبق غير معروف";
+    await saveDishEntry({
+      imageDataUrl,
+      predictedFromAi,
+      confirmed,
+      quantityValue: positiveIntQuantity(quantity),
+      sourceEntity,
+      staffMe,
+      onSaved: () => {
+        setSelectedImage(null);
+        setDetectResult(null);
+        setSelectedAlternative("");
+        setManualDish("");
+        setQuantity(1);
+        setSourceEntity("");
+      },
+      onNetworkError: (err) => {
+        console.error("[dish save] network or parse error", err);
+        setDishNotice({
+          type: "error",
+          text: "تعذر الاتصال بالخادم أو قراءة الاستجابة. تحقق من تشغيل الـ backend والشبكة.",
+        });
+      },
+    });
   }
 
   function openEditRecord(record) {
@@ -1444,62 +1365,15 @@ export default function Dashboard() {
   }
 
   async function saveEditedRecord() {
-    if (!editingRecord) return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (!token) return;
-    setEditSaving(true);
-    try {
-      const result = await updateDishRecord({
-        token,
-        rawId: editingRecord.rawId,
-        confirmedLabel: editForm.label,
-        quantityValue: positiveIntQuantity(editForm.quantity),
-        sourceEntity: editForm.source,
-      });
-      if (!result.ok) {
-        setToast({ type: "error", text: dishSaveErrorMessage(result.status, result.body) });
-        return;
-      }
-      const updated = toStaffRecord(result.body, {
-        localPreviewUrl: editingRecord.localPreviewUrl,
-        confidenceRatio: editingRecord.confidenceRatio,
-      });
-      setStaffRecords((prev) => prev.map((r) => (r.rawId === updated.rawId ? updated : r)));
-      setToast({ type: "success", text: "تم تحديث السجل." });
-      setEditingRecord(null);
-    } catch {
-      setToast({ type: "error", text: "تعذر تحديث السجل." });
-    } finally {
-      setEditSaving(false);
-    }
+    await saveEditedDishRecord({
+      editingRecord,
+      editForm,
+      quantityValue: positiveIntQuantity(editForm.quantity),
+    });
   }
 
   async function confirmDeleteRecord(recordOverride) {
-    const target = recordOverride ?? deleteTarget;
-    if (!target) return;
-    if (target.reviewStatus === "approved") return;
-    const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-    if (!token) return;
-    setDeleteLoading(true);
-    try {
-      const result = await deleteDishRecord({ token, rawId: target.rawId });
-      if (!result.ok) {
-        setToast({ type: "error", text: dishSaveErrorMessage(result.status, result.body) });
-        return;
-      }
-      if (target.localPreviewUrl?.startsWith("blob:")) {
-        URL.revokeObjectURL(target.localPreviewUrl);
-        committedBlobUrlsRef.current.delete(target.localPreviewUrl);
-      }
-      setStaffRecords((prev) => prev.filter((r) => r.rawId !== target.rawId));
-      setStaffCount((c) => Math.max(0, c - 1));
-      setToast({ type: "success", text: "تم حذف السجل." });
-      setDeleteTarget(null);
-    } catch {
-      setToast({ type: "error", text: "تعذر حذف السجل." });
-    } finally {
-      setDeleteLoading(false);
-    }
+    await confirmDeleteDishRecord({ recordOverride, deleteTarget });
   }
 
   return (
