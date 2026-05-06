@@ -4,7 +4,7 @@ import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS, USER_INFO_KEY, USER_ROLE_KEY } 
 import { dishSaveErrorMessage } from "../utils/apiError.js";
 import { formatConfidencePercentDisplay } from "../utils/confidence.js";
 import { useDetectDish } from "../hooks/useDetectDish.js";
-import { saveDishRecord } from "../services/dishRecordService.js";
+import { fetchDishRecords, saveDishRecord } from "../services/dishRecordService.js";
 import {
   formatSaudiDateLine,
   formatSaudiDateTime,
@@ -1212,15 +1212,11 @@ export default function Dashboard() {
     if (!token) return;
     setStaffRecordsLoading(true);
     try {
-      const res = await fetch(DISHES_URL, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !Array.isArray(data)) return;
+      const result = await fetchDishRecords({ token });
+      if (!result.ok) return;
       committedBlobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
       committedBlobUrlsRef.current.clear();
-      const mapped = data.map((row) => toStaffRecord(row));
+      const mapped = result.data.map((row) => toStaffRecord(row));
       setStaffRecords(mapped);
       setStaffCount(mapped.length);
       setStaffRecordsLastUpdated(formatSaudiTimeLine(new Date()));

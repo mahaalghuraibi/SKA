@@ -61,3 +61,18 @@ export async function saveDishRecord({
   }
   return { ok: true, data };
 }
+
+/**
+ * Fetch staff dish records list via GET /api/v1/dishes.
+ */
+export async function fetchDishRecords({ token }) {
+  const res = await fetch(DISHES_URL, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !Array.isArray(data)) {
+    return { ok: false, status: res.status, body: data };
+  }
+  return { ok: true, data };
+}
