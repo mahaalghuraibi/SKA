@@ -35,7 +35,7 @@ export default function DishFilters({
   onResetFilters,
 }) {
   return (
-    <article className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass backdrop-blur-xl transition duration-300 hover:border-white/15 hover:shadow-glass-lg sm:p-6 space-y-5">
+    <>
       {/* Header */}
       <header className="flex items-center justify-between border-b border-white/10 pb-4">
         <h3 className="text-xl font-bold tracking-tight text-white">
@@ -241,6 +241,6 @@ export default function DishFilters({
           </select>
         </div>
       </div>
-    </article>
+    </>
   );
 }
