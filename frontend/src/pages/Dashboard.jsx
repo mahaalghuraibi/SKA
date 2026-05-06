@@ -16,6 +16,7 @@ import { staffAvatarInitials, staffWelcomeDisplayName } from "../utils/avatarIni
 import DashboardNav from "../components/navigation/DashboardNav.jsx";
 import DishDocSection from "../components/dish/DishDocSection.jsx";
 import DishFilters from "../components/dish/DishFilters.jsx";
+import RecordsList from "../components/dish/RecordsList.jsx";
 
 /** Merge API `avatar_url` / `avatar_data_url` for UI + `<img src>`. */
 function normalizeStaffMeUser(body) {
@@ -2266,118 +2267,15 @@ export default function Dashboard() {
               className="scroll-mt-28 sm:scroll-mt-32 lg:scroll-mt-36"
             >
             <article className={`${glassCard} space-y-6 p-4 sm:space-y-8 sm:p-6 lg:p-8`}>
-              <div className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-end sm:justify-between">
-                <h3 className="text-xl font-bold tracking-tight text-white">
-                  سجل الأطباق <span className="ms-2 text-[1.1em] opacity-90" aria-hidden>📋</span>
-                </h3>
-                <div className="text-sm text-slate-400">
-                  <p>
-                    عرض <span className="font-semibold text-slate-200">{displayedRecords.length}</span> من{" "}
-                    <span className="font-semibold text-slate-200">{staffRecords.length}</span> سجلًا
-                  </p>
-                  {staffRecordsLastUpdated ? (
-                    <p className="mt-1 text-xs text-slate-500">آخر تحديث: {staffRecordsLastUpdated}</p>
-                  ) : null}
-                </div>
-              </div>
-
-              {staffRecordsLoading ? (
-                <ul className="space-y-5">
-                  {[1, 2, 3].map((k) => (
-                    <li key={k} className="animate-pulse rounded-2xl border border-white/10 bg-[#060d1f]/90 p-5">
-                      <div className="mb-3 h-5 w-48 rounded bg-white/10" />
-                      <div className="mb-2 h-4 w-64 rounded bg-white/10" />
-                      <div className="h-4 w-36 rounded bg-white/10" />
-                    </li>
-                  ))}
-                </ul>
-              ) : staffRecords.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-white/15 bg-[#060d1f]/80 px-6 py-14 text-center">
-                  <IconDish className="mx-auto mb-4 h-12 w-12 text-slate-600" />
-                  <p className="text-base font-medium text-slate-300">لا توجد أطباق مسجلة بعد</p>
-                  <p className="mt-2 text-sm text-slate-500">سجّل أول طبق من النموذج أعلاه لتظهر هنا.</p>
-                </div>
-              ) : displayedRecords.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-amber-500/25 bg-[#060d1f]/80 px-6 py-12 text-center text-slate-300">
-                  لا توجد نتائج مطابقة للفلاتر
-                </div>
-              ) : (
-                <ul className="space-y-5">
-                  {displayedRecords.map((record) => {
-                    const highlighted = highlightRawId === record.rawId;
-                    const reviewBorder = record.needsReviewBadge
-                      ? "border-orange-400/50 ring-1 ring-orange-400/15"
-                      : "";
-                    const trustBorder =
-                      record.trustworthyBadge && !record.needsReviewBadge
-                        ? "border-emerald-500/35 ring-1 ring-emerald-500/10"
-                        : "border-white/10";
-                    const hl = highlighted ? "shadow-[0_0_28px_-6px_rgba(56,189,248,0.45)] ring-1 ring-brand-sky/35" : "";
-                    const confLabel =
-                      record.confidenceRatio != null && Number.isFinite(record.confidenceRatio)
-                        ? formatConfidencePercentDisplay(record.confidenceRatio)
-                        : null;
-                    return (
-                      <li
-                        key={record.id}
-                        id={`dish-row-${record.rawId}`}
-                        className={`group rounded-2xl border bg-[#060d1f]/90 p-4 shadow-md transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/25 sm:p-5 ${reviewBorder || trustBorder} ${hl}`}
-                      >
-                        <div className="flex gap-3 sm:gap-4">
-                          <FoodImageThumb
-                            src={dishRecordThumbSrc(record)}
-                            alt={record.label}
-                            sizeClass="h-20 w-20 shrink-0 rounded-xl sm:h-24 sm:w-24"
-                          />
-                          <div className="min-w-0 flex-1">
-                            {/* Top row: dish name + actions */}
-                            <div className="flex flex-wrap items-start justify-between gap-2">
-                              <p className="break-words text-lg font-bold text-brand-sky sm:text-xl">
-                                {record.label}
-                              </p>
-                              <div className="flex items-center gap-1.5">
-                                {record.needsReviewBadge ? (
-                                  <span className="rounded-full border border-orange-400/50 bg-orange-500/15 px-2 py-0.5 text-[10px] font-semibold text-orange-100">مراجعة</span>
-                                ) : null}
-                                {record.reviewStatus === "rejected" ? (
-                                  <span className="rounded-full border border-red-400/50 bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-100">مرفوض</span>
-                                ) : null}
-                                {record.trustworthyBadge ? (
-                                  <span className="rounded-full border border-accent-green/45 bg-accent-green/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">معتمد</span>
-                                ) : null}
-                                {record.reviewStatus !== "approved" ? (
-                                  <>
-                                    <button type="button" title="تعديل" onClick={() => openEditRecord(record)}
-                                      className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-2 py-1 text-xs text-slate-200 transition hover:border-brand-sky/40 hover:text-white">✏️</button>
-                                    <button type="button" title="حذف" onClick={() => setDeleteTarget(record)}
-                                      className="rounded-lg border border-accent-red/35 bg-accent-red/10 px-2 py-1 text-xs text-red-200 transition hover:bg-accent-red/20">🗑️</button>
-                                  </>
-                                ) : null}
-                              </div>
-                            </div>
-                            {/* Date + time compact */}
-                            <p className="mt-1 text-xs text-slate-500" dir="rtl">
-                              📅 {record.dateLine} &nbsp;⏰ {record.timeLine}
-                            </p>
-                            {/* Meta row */}
-                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-                              <span>كمية: <span className="font-semibold text-slate-200">{record.quantity}</span></span>
-                              {record.sourceEntity ? <span>مصدر: <span className="text-slate-200">{record.sourceEntity}</span></span> : null}
-                              <span className={`font-semibold ${staffStatusTone(record.statusText)}`}>{record.statusText}</span>
-                              {confLabel && confLabel !== "—" ? (
-                                <span>ثقة: <span className={`font-semibold ${!record.needsReviewBadge && record.confidenceRatio != null && record.confidenceRatio >= 0.75 ? "text-emerald-300" : "text-brand-sky"}`}>{confLabel}</span></span>
-                              ) : null}
-                              {record.reviewStatus === "rejected" && record.rejectedReason ? (
-                                <span className="text-red-300">سبب الرفض: <span className="font-semibold">{record.rejectedReason}</span></span>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+              <RecordsList
+                staffRecords={staffRecords}
+                displayedRecords={displayedRecords}
+                staffRecordsLoading={staffRecordsLoading}
+                staffRecordsLastUpdated={staffRecordsLastUpdated}
+                highlightRawId={highlightRawId}
+                onEdit={openEditRecord}
+                onDelete={setDeleteTarget}
+              />
             </article>
             </div>
 

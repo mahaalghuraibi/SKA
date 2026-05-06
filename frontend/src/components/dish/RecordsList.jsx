@@ -11,7 +11,7 @@ export default function RecordsList({
   onDelete,
 }) {
   return (
-    <article className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass backdrop-blur-xl transition duration-300 hover:border-white/15 hover:shadow-glass-lg sm:p-6 lg:p-8 space-y-6 sm:space-y-8">
+    <>
       <div className="flex flex-col gap-3 border-b border-white/10 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <h3 className="text-xl font-bold tracking-tight text-white">
           سجل الأطباق <span className="ms-2 text-[1.1em] opacity-90" aria-hidden>📋</span>
@@ -60,6 +60,6 @@ export default function RecordsList({
           ))}
         </ul>
       )}
-    </article>
+    </>
   );
 }
