@@ -76,3 +76,42 @@ export async function fetchDishRecords({ token }) {
   }
   return { ok: true, data };
 }
+
+/**
+ * Update one dish record via PATCH /api/v1/dishes/{id}.
+ */
+export async function updateDishRecord({ token, rawId, confirmedLabel, quantityValue, sourceEntity }) {
+  const payload = {
+    confirmed_label: confirmedLabel.trim().slice(0, 255),
+    quantity: quantityValue,
+    source_entity: (sourceEntity.trim() || "غير محدد").slice(0, 100),
+  };
+  const res = await fetch(`${DISHES_URL}/${rawId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return { ok: false, status: res.status, body, payload };
+  }
+  return { ok: true, body };
+}
+
+/**
+ * Delete one dish record via DELETE /api/v1/dishes/{id}.
+ */
+export async function deleteDishRecord({ token, rawId }) {
+  const res = await fetch(`${DISHES_URL}/${rawId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { ok: false, status: res.status, body };
+  }
+  return { ok: true };
+}

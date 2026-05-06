@@ -4,7 +4,7 @@ import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS, USER_INFO_KEY, USER_ROLE_KEY } 
 import { dishSaveErrorMessage } from "../utils/apiError.js";
 import { formatConfidencePercentDisplay } from "../utils/confidence.js";
 import { useDetectDish } from "../hooks/useDetectDish.js";
-import { fetchDishRecords, saveDishRecord } from "../services/dishRecordService.js";
+import { deleteDishRecord, fetchDishRecords, saveDishRecord, updateDishRecord } from "../services/dishRecordService.js";
 import {
   formatSaudiDateLine,
   formatSaudiDateTime,
@@ -207,7 +207,6 @@ function isValidYmdDate(text) {
 /** Dish photos stored as data URLs in DB; under backend `_MAX_DISH_IMAGE_URL_LEN` */
 const DISH_IMAGE_DATA_URL_MAX_CHARS = 5_800_000;
 
-const DISHES_URL = "/api/v1/dishes";
 const SUPERVISOR_REVIEWS_URL = "/api/v1/supervisor/reviews";
 const SUPERVISOR_CAMERAS_URL = "/api/v1/supervisor/cameras";
 
@@ -1450,24 +1449,18 @@ export default function Dashboard() {
     if (!token) return;
     setEditSaving(true);
     try {
-      const res = await fetch(`${DISHES_URL}/${editingRecord.rawId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          confirmed_label: editForm.label.trim().slice(0, 255),
-          quantity: positiveIntQuantity(editForm.quantity),
-          source_entity: (editForm.source.trim() || "غير محدد").slice(0, 100),
-        }),
+      const result = await updateDishRecord({
+        token,
+        rawId: editingRecord.rawId,
+        confirmedLabel: editForm.label,
+        quantityValue: positiveIntQuantity(editForm.quantity),
+        sourceEntity: editForm.source,
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setToast({ type: "error", text: dishSaveErrorMessage(res.status, body) });
+      if (!result.ok) {
+        setToast({ type: "error", text: dishSaveErrorMessage(result.status, result.body) });
         return;
       }
-      const updated = toStaffRecord(body, {
+      const updated = toStaffRecord(result.body, {
         localPreviewUrl: editingRecord.localPreviewUrl,
         confidenceRatio: editingRecord.confidenceRatio,
       });
@@ -1489,13 +1482,9 @@ export default function Dashboard() {
     if (!token) return;
     setDeleteLoading(true);
     try {
-      const res = await fetch(`${DISHES_URL}/${target.rawId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setToast({ type: "error", text: dishSaveErrorMessage(res.status, body) });
+      const result = await deleteDishRecord({ token, rawId: target.rawId });
+      if (!result.ok) {
+        setToast({ type: "error", text: dishSaveErrorMessage(result.status, result.body) });
         return;
       }
       if (target.localPreviewUrl?.startsWith("blob:")) {
