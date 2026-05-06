@@ -2,16 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS, USER_INFO_KEY, USER_ROLE_KEY } from "../constants.js";
 import { dishSaveErrorMessage } from "../utils/apiError.js";
+import { formatConfidencePercentDisplay } from "../utils/confidence.js";
+import { detectDish, UNKNOWN_DISH_TEXT } from "../services/detectDishService.js";
 import {
   formatSaudiDateLine,
   formatSaudiDateTime,
   formatSaudiTimeLine,
 } from "../utils/datetime.js";
-import {
-  computeDishStats,
-  DISH_TYPE_FILTER_OPTIONS,
-  filterAndSortDishRecords,
-} from "../utils/dishRecordsDisplay.js";
+import { computeDishStats, filterAndSortDishRecords } from "../utils/dishRecordsDisplay.js";
 import DashboardNav from "../components/navigation/DashboardNav.jsx";
 import Toast from "../components/shared/Toast.jsx";
 import DeleteConfirmModal from "../components/shared/DeleteConfirmModal.jsx";
@@ -224,8 +222,6 @@ const MONITORING_ANALYZE_URL = "/api/v1/monitoring/analyze-frame";
 const DISH_REVIEW_UPDATED_EVENT = "ska:dish-review-updated";
 const SUPERVISOR_SUMMARY_URL = "/api/v1/supervisor/summary";
 const SUPERVISOR_EMPLOYEES_URL = "/api/v1/supervisor/employees";
-const UNKNOWN_DISH_TEXT = "طبق غير محدد";
-
 function positiveIntQuantity(raw) {
   const n = Math.floor(Number(raw));
   if (!Number.isFinite(n) || n < 1) return 1;
@@ -245,42 +241,6 @@ function readImageFileAsDataURL(file) {
   });
 }
 
-/** Pull confidence from API object (snake_case / loose providers). */
-function rawConfidenceFromSuggestion(s) {
-  if (!s || typeof s !== "object") return null;
-  const v =
-    s.confidence ??
-    s.Confidence ??
-    s.score ??
-    s.Score ??
-    s.probability ??
-    s.confidence_score;
-  if (v == null || v === "") return null;
-  return v;
-}
-
-/**
- * Normalize to 0–1: 0.615 stays 0.615; 61.5 means 61.5% → 0.615. No double scaling.
- * @returns {number | null}
- */
-function normalizeConfidenceRatio(raw) {
-  if (raw == null || raw === "") return null;
-  const n = typeof raw === "number" ? raw : Number(String(raw).trim());
-  if (!Number.isFinite(n)) return null;
-  if (n >= 0 && n <= 1) return n;
-  if (n > 1 && n <= 100) return Math.min(1, n / 100);
-  if (n > 100) return 1;
-  return null;
-}
-
-/** Display as one-decimal percent; unknown → em dash (not 0%). */
-function formatConfidencePercentDisplay(raw) {
-  const r = normalizeConfidenceRatio(raw);
-  if (r == null) return "—";
-  if (r <= 0) return "0%";
-  return `${Math.round(r * 100 * 10) / 10}%`;
-}
-
 function supervisorStatusText(status) {
   if (status === "approved") return "تم الاعتماد";
   if (status === "rejected") return "مرفوض";
@@ -293,17 +253,6 @@ function roleAr(role) {
   if (role === "admin") return "أدمن";
   return role || "—";
 }
-
-const CAMERA_CHECK_ITEMS = [
-  { key: "mask", label: "الكمامة", icon: "😷" },
-  { key: "gloves", label: "القفازات", icon: "🧤" },
-  { key: "headcover", label: "غطاء الرأس", icon: "🧢" },
-  { key: "uniform", label: "الزي الرسمي", icon: "👕" },
-  { key: "hygiene", label: "النظافة العامة", icon: "🧼" },
-  { key: "wet_floor", label: "الأرضيات المبللة", icon: "💧" },
-  { key: "trash_location", label: "موقع الحاويات", icon: "🗑️" },
-];
-
 
 function staffStatusText(status, needsReview) {
   if (status === "approved") return "تم الاعتماد";
@@ -405,7 +354,7 @@ export default function Dashboard() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedPreviewUrl, setSelectedPreviewUrl] = useState("");
   const [captureModalOpen, setCaptureModalOpen] = useState(false);
-  const [captureMode, setCaptureMode] = useState("choice");
+  const [, setCaptureMode] = useState("choice");
   const [cameraLoading, setCameraLoading] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [detecting, setDetecting] = useState(false);
@@ -506,9 +455,10 @@ export default function Dashboard() {
   }, [selectedImage]);
 
   useEffect(() => {
+    const blobUrlSet = committedBlobUrlsRef.current;
     return () => {
-      committedBlobUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
-      committedBlobUrlsRef.current.clear();
+      blobUrlSet.forEach((u) => URL.revokeObjectURL(u));
+      blobUrlSet.clear();
     };
   }, []);
 
@@ -644,7 +594,6 @@ export default function Dashboard() {
         const email = body?.email != null ? String(body.email).trim() : "";
         if (res.ok && email) {
           const normalized = normalizeStaffMeUser(body);
-          // eslint-disable-next-line no-console
           console.log("[ska] currentUser loaded", {
             url,
             email: normalized.email,
@@ -654,15 +603,12 @@ export default function Dashboard() {
           setStaffMe(normalized);
           return normalized;
         }
-        // eslint-disable-next-line no-console
         console.warn("[ska] currentUser fetch not ok", { url, status: res.status, detail: body?.detail });
       }
       setStaffMe(null);
-      // eslint-disable-next-line no-console
       console.warn("[ska] currentUser: all profile endpoints failed", { tried: CURRENT_USER_ME_URLS });
       return null;
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.warn("[ska] currentUser fetch error", e);
       setStaffMe(null);
       return null;
@@ -1391,156 +1337,30 @@ export default function Dashboard() {
     setSelectedAlternative("");
     if (!preserveManual) setManualDish("");
     try {
-      const form = new FormData();
-      form.append("image", file);
-      const res = await fetch("/api/v1/detect-dish", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.error("detect-dish failed:", { status: res.status, body: data });
-        if (res.status === 401) {
+      const result = await detectDish(token, file);
+      if (!result.ok) {
+        console.error("detect-dish failed:", { status: result.status, body: result.body });
+        if (result.status === 401) {
           setDishNotice({ type: "error", text: "انتهت الجلسة — سجّل الدخول مجددًا ثم أعد المحاولة." });
         } else {
           setDishNotice({ type: "error", text: "تعذر التعرف على الطبق، يرجى الاختيار يدويًا" });
         }
         return;
       }
-      const apiDishNameAr = String(data?.dish_name_ar || "").trim();
-      const apiDishName = String(data?.dish_name || "").trim();
-      const suggestedName = String(data?.suggested_name || "").trim();
-      const preferredDishName = apiDishNameAr || apiDishName || suggestedName;
-      const detectedDishName =
-        preferredDishName === "غير متأكد" ? UNKNOWN_DISH_TEXT : preferredDishName || UNKNOWN_DISH_TEXT;
-      const detectedClasses = Array.isArray(data?.detected_classes) ? data.detected_classes : [];
-      const rawSuggestions = Array.isArray(data?.suggestions) ? data.suggestions : [];
-      const apiTopConf = normalizeConfidenceRatio(data?.confidence);
-      let suggestions = rawSuggestions
-        .filter((s) => s && typeof s === "object")
-        .map((s) => {
-          const ratio = normalizeConfidenceRatio(rawConfidenceFromSuggestion(s));
-          return {
-            name: String(s.name || s.Name || "").trim(),
-            confidence: ratio,
-            reason: String(s.reason || s.Reason || "").trim(),
-          };
-        })
-        .filter((s) => s.name)
-        .slice(0, 3);
-      // If per-item confidence is missing but API sent top confidence, fill so chips match (avoid 0 ?? api bug).
-      suggestions = suggestions.map((s, idx) => {
-        if (s.confidence != null) return { ...s, confidence: s.confidence };
-        if (apiTopConf == null) return { ...s, confidence: null };
-        if (idx === 0) return { ...s, confidence: apiTopConf };
-        return { ...s, confidence: Math.max(0.02, apiTopConf * (0.9 - idx * 0.12)) };
-      });
-      const suggestedOptions = Array.isArray(data?.suggested_options) ? data.suggested_options : [];
-      const optionList =
-        suggestions.length > 0
-          ? suggestions.map((s) => s.name)
-          : (suggestedOptions.length > 0 ? suggestedOptions : data?.labels || []).slice(0, 3);
-      if (suggestions.length === 0 && optionList.length > 0) {
-        const top = apiTopConf;
-        suggestions = optionList.slice(0, 3).map((name, i) => ({
-          name,
-          confidence:
-            top != null && Number.isFinite(top) && top > 0
-              ? i === 0
-                ? top
-                : Math.max(0.02, top * (0.9 - i * 0.12))
-              : null,
-          reason: "",
-        }));
-      }
-      // Post-process: drop suggestions outside the detected dish's category.
-      // Only acts when the category is clearly known; otherwise keeps AI output as-is.
-      if (detectedDishName && detectedDishName !== UNKNOWN_DISH_TEXT) {
-        const _CAT = {
-          "برجر": "burger",       "تشيز برجر": "burger",    "برجر دجاج": "burger",
-          "بيتزا": "pizza",       "مكرونة": "pasta",         "ساندويتش": "sandwich",
-          "ستيك": "steak",
-          "كباب": "grilled",      "كفتة": "grilled",         "مشويات": "grilled",
-          "دجاج مشوي": "grilled", "شاورما": "grilled",       "دجاج": "grilled",      "لحم": "grilled",
-          "سمك": "seafood",       "روبيان": "seafood",
-          "كبسة دجاج": "rice",   "كبسة لحم": "rice",        "مندي": "rice",
-          "رز بخاري": "rice",    "برياني": "rice",           "مقلوبة": "rice",        "رز": "rice",
-          "ورق عنب": "stuffed",   "محشي": "stuffed",
-          "سلطة": "salad",        "شوربة": "soup",
-          "خبز": "bread",         "حلويات": "dessert",       "بطاطس مقلية": "sides",
-        };
-        const _FILL = {
-          burger:   ["برجر", "تشيز برجر", "برجر دجاج"],
-          pizza:    ["بيتزا", "مكرونة", "ساندويتش"],
-          pasta:    ["مكرونة", "بيتزا", "خبز"],
-          steak:    ["ستيك", "كباب", "مشويات"],
-          grilled:  ["كباب", "مشويات", "دجاج مشوي"],
-          seafood:  ["سمك", "روبيان", "مشويات"],
-          rice:     ["كبسة دجاج", "مندي", "رز بخاري"],
-          stuffed:  ["ورق عنب", "محشي", "مقلوبة"],
-        };
-        const topCat = _CAT[detectedDishName];
-        if (topCat) {
-          const same = suggestions.filter(s => _CAT[s.name] === topCat || s.name === detectedDishName);
-          if (same.length < suggestions.length) {
-            const seen = new Set(same.map(s => s.name));
-            const fills = (_FILL[topCat] || []);
-            for (const name of fills) {
-              if (same.length >= 3) break;
-              if (!seen.has(name)) { same.push({ name, confidence: 0, reason: "" }); seen.add(name); }
-            }
-            suggestions = same.slice(0, 3);
-          }
-        }
-      }
-
-      const visualReason = String(data?.visual_reason || data?.suggestion_reason || "").trim();
-      const topFromFirst = suggestions.length > 0 ? suggestions[0].confidence : null;
-      const topFromApi = apiTopConf;
-      const topConfRatio =
-        topFromFirst != null && Number.isFinite(topFromFirst)
-          ? topFromFirst
-          : topFromApi != null && Number.isFinite(topFromApi)
-            ? topFromApi
-            : null;
-      const topConfidencePct =
-        topConfRatio != null
-          ? Math.round(Math.max(0, Math.min(1, topConfRatio)) * 100 * 10) / 10
-          : null;
-      const proteinConflict = Boolean(data?.protein_conflict);
-      const needsReviewLowConf =
-        (topConfRatio != null && Number.isFinite(topConfRatio) && topConfRatio < 0.75) ||
-        (topConfRatio == null && Boolean(data?.needs_review));
-      const normalized = {
-        detected: detectedDishName,
-        confidence: topConfidencePct,
-        topConfRatio,
-        suggestions,
-        alternatives: optionList,
-        experimental: Boolean(data?.experimental),
-        suggestedName: suggestedName || null,
-        suggestionReason: String(data?.suggestion_reason || "").trim(),
-        visualReason,
-        needsReview: Boolean(data?.needs_review),
-        needsReviewLowConf,
-        proteinConflict,
-        visionModel: String(data?.vision_model || "").trim(),
-        proteinType: String(data?.protein_type || "").trim(),
-      };
+      const normalized = result.normalized;
       const autofillDishName =
-        suggestions[0]?.name ||
+        normalized.suggestions[0]?.name ||
         (normalized.detected === UNKNOWN_DISH_TEXT && normalized.suggestedName
           ? normalized.suggestedName
-          : optionList[0] || normalized.detected);
+          : normalized.alternatives[0] || normalized.detected);
       setDetectResult(normalized);
-      const skipAutofill = proteinConflict || needsReviewLowConf;
+      const skipAutofill = normalized.proteinConflict || normalized.needsReviewLowConf;
       if (skipAutofill) {
         setSelectedAlternative("");
         setManualDish("");
         setDishNotice({
           type: "warning",
-          text: proteinConflict
+          text: normalized.proteinConflict
             ? "تعارض بين الاقتراحات (مثل سمك ولحم أو سمك ودجاج). اختر أحد الخيارات أو اكتب الاسم يدويًا — لم يُملأ الحقل تلقائيًا."
             : "ثقة الاقتراح أقل من 75%. اختر أحد الخيارات أو اكتب اسم الطبق يدويًا — لم يُملأ الحقل تلقائيًا.",
         });
