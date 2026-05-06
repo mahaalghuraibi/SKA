@@ -1,0 +1,16 @@
+# Trained weights (add to deployment separately)
+artifacts/*.pt
+artifacts/*.onnx
+artifacts/*.pth
+artifacts/*.bin
+
+# Collected images (keep folder layout in git; ignore media)
+dataset/raw/**/*.jpg
+dataset/raw/**/*.jpeg
+dataset/raw/**/*.png
+dataset/raw/**/*.webp
+dataset/raw/**/*.JPG
+dataset/raw/**/*.PNG
+
+# Optional train/val materialization from scripts
+dataset/split/

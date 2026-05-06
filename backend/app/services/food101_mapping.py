@@ -1,0 +1,123 @@
+"""Map Food-101 class slugs (and HF label variants) to SKA Arabic dish taxonomy."""
+
+# Explicit Food-101 slugs -> canonical Arabic (allowed menu)
+FOOD101_SLUG_TO_AR: dict[str, str] = {
+    "apple_pie": "طبق غير محدد",
+    "baby_back_ribs": "لحم",
+    "baklava": "خبز",
+    "beef_carpaccio": "لحم",
+    "beef_tartare": "لحم",
+    "beet_salad": "سلطة",
+    "beignets": "خبز",
+    "bibimbap": "رز",
+    "bread_pudding": "خبز",
+    "breakfast_burrito": "خبز",
+    "bruschetta": "خبز",
+    "caesar_salad": "سلطة",
+    "cannoli": "طبق غير محدد",
+    "caprese_salad": "سلطة",
+    "carrots": "سلطة",
+    "ceviche": "سمك",
+    "cheese_plate": "طبق غير محدد",
+    "cheesecake": "طبق غير محدد",
+    "chicken_curry": "دجاج",
+    "chicken_quesadilla": "دجاج",
+    "chicken_wings": "دجاج",
+    "chocolate_cake": "طبق غير محدد",
+    "chocolate_mousse": "طبق غير محدد",
+    "churros": "خبز",
+    "clam_chowder": "شوربة",
+    "club_sandwich": "خبز",
+    "crab_cakes": "سمك",
+    "creme_brulee": "طبق غير محدد",
+    "croque_madame": "خبز",
+    "cup_cakes": "طبق غير محدد",
+    "deviled_eggs": "طبق غير محدد",
+    "donuts": "خبز",
+    "dumplings": "طبق غير محدد",
+    "edamame": "سلطة",
+    "eggs_benedict": "طبق غير محدد",
+    "escargots": "طبق غير محدد",
+    "falafel": "كباب",
+    "filet_mignon": "لحم",
+    "fish_and_chips": "سمك",
+    "foie_gras": "لحم",
+    "french_fries": "طبق غير محدد",
+    "french_onion_soup": "شوربة",
+    "french_toast": "خبز",
+    "fried_calamari": "سمك",
+    "fried_rice": "رز",
+    "frozen_yogurt": "طبق غير محدد",
+    "garlic_bread": "خبز",
+    "gnocchi": "مكرونة",
+    "greek_salad": "سلطة",
+    "grilled_cheese_sandwich": "خبز",
+    "grilled_salmon": "سمك",
+    "guacamole": "سلطة",
+    "gyoza": "طبق غير محدد",
+    "hamburger": "لحم",
+    "hot_and_sour_soup": "شوربة",
+    "hot_dog": "لحم",
+    "huevos_rancheros": "طبق غير محدد",
+    "hummus": "سلطة",
+    "ice_cream": "طبق غير محدد",
+    "lasagna": "مكرونة",
+    "lobster_bisque": "شوربة",
+    "lobster_roll_sandwich": "سمك",
+    "macaroni_and_cheese": "مكرونة",
+    "macarons": "طبق غير محدد",
+    "miso_soup": "شوربة",
+    "mussels": "سمك",
+    "nachos": "خبز",
+    "omelette": "دجاج",
+    "onion_rings": "طبق غير محدد",
+    "oysters": "سمك",
+    "pad_thai": "مكرونة",
+    "paella": "رز",
+    "pancakes": "خبز",
+    "panna_cotta": "طبق غير محدد",
+    "peking_duck": "دجاج",
+    "pho": "شوربة",
+    "pizza": "خبز",
+    "pork_chop": "لحم",
+    "poutine": "رز",
+    "prime_rib": "لحم",
+    "pulled_pork_sandwich": "لحم",
+    "ramen": "شوربة",
+    "ravioli": "مكرونة",
+    "red_velvet_cake": "طبق غير محدد",
+    "risotto": "رز",
+    "samosa": "كباب",
+    "sashimi": "سمك",
+    "scallops": "سمك",
+    "seaweed_salad": "سلطة",
+    "shrimp_and_grits": "سمك",
+    "spaghetti_bolognese": "مكرونة",
+    "spaghetti_carbonara": "مكرونة",
+    "spring_rolls": "طبق غير محدد",
+    "steak": "لحم",
+    "sushi": "سمك",
+    "tacos": "كباب",
+    "takoyaki": "سمك",
+    "tiramisu": "طبق غير محدد",
+    "tuna_tartare": "سمك",
+    "waffles": "خبز",
+}
+
+
+def slugify_food101_label(label: str) -> str:
+    t = (label or "").strip().lower().replace("-", "_")
+    t = "_".join(t.split())
+    return t
+
+
+def map_food101_label_to_arabic(label: str) -> str:
+    slug = slugify_food101_label(label)
+    if slug in FOOD101_SLUG_TO_AR:
+        return FOOD101_SLUG_TO_AR[slug]
+    # HF models sometimes return "Macaroni And Cheese"
+    if slug.replace("_", "") in {k.replace("_", "") for k in FOOD101_SLUG_TO_AR}:
+        for k, v in FOOD101_SLUG_TO_AR.items():
+            if k.replace("_", "") == slug.replace("_", ""):
+                return v
+    return "طبق غير محدد"

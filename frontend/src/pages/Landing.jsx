@@ -1,0 +1,501 @@
+import { Link } from "react-router-dom";
+
+function IconCamera({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 7h3l2-2h6l2 2h3a2 2 0 012 2v9a2 2 0 01-2 2H4a2 2 0 01-2-2V9a2 2 0 012-2z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13" r="3.5" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function IconDish({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <ellipse cx="12" cy="14" rx="8" ry="4" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M4 14c0-4 3.5-8 8-8s8 4 8 8"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconBell({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 22a2.5 2.5 0 002.45-2H9.55A2.5 2.5 0 0012 22z"
+        fill="currentColor"
+      />
+      <path
+        d="M18 8a6 6 0 10-12 0c0 7-3 7-3 7h18s-3 0-3-7"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconChart({ className }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 19V5M4 19h16M8 17V11M12 17V8M16 17v-5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** CSS-only futuristic kitchen / dashboard preview */
+function KitchenVisualMock() {
+  return (
+    <div className="relative mx-auto aspect-[4/3] w-full max-w-lg lg:max-w-none lg:aspect-[5/4]">
+      <div className="absolute inset-0 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900/90 via-navy/80 to-brand/25 shadow-glass-lg backdrop-blur-xl">
+        <div className="absolute inset-0 opacity-40 hero-grid-lines" />
+        <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-[#020617]/80 via-transparent to-brand-sky/5" />
+        <div className="absolute inset-x-4 top-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 backdrop-blur-md">
+          <span className="flex items-center gap-2 text-[10px] font-medium text-slate-300 sm:text-xs">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-green opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-accent-green" />
+            </span>
+            بث مباشر · منطقة الطهي A
+          </span>
+          <span className="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-brand-sky">LIVE</span>
+        </div>
+        <div className="absolute inset-x-4 bottom-4 top-16 flex flex-col gap-2 sm:top-20">
+          <div className="flex flex-1 items-end gap-2">
+            {[44, 72, 56, 88, 52, 96, 64].map((h, i) => (
+              <div
+                key={i}
+                className="flex-1 rounded-t-md bg-gradient-to-t from-brand/40 to-brand-sky/60 opacity-80 shadow-[0_0_20px_-4px_rgba(56,189,248,0.4)]"
+                style={{ height: `${h}%` }}
+              />
+            ))}
+          </div>
+          <div className="flex gap-2 text-[9px] text-slate-400 sm:text-[10px]">
+            <span className="rounded border border-white/10 bg-white/5 px-2 py-1">AI: كشف السلامة</span>
+            <span className="rounded border border-white/10 bg-white/5 px-2 py-1">توثيق الأطباق</span>
+          </div>
+        </div>
+      </div>
+
+      <div
+        className="absolute -end-2 top-[8%] z-10 max-w-[11rem] animate-stat-float rounded-xl border border-white/10 bg-white/5 p-3 shadow-glass backdrop-blur-xl sm:-end-4 sm:max-w-[13rem] sm:p-3.5"
+        style={{ animationDelay: "-1s" }}
+      >
+        <p className="text-[10px] font-medium text-slate-400">تسجيل الأطباق</p>
+        <p className="mt-0.5 text-lg font-bold tabular-nums text-white sm:text-xl">
+          125 <span className="text-xs font-semibold text-accent-green">اليوم</span>
+        </p>
+      </div>
+      <div
+        className="absolute -start-2 top-[38%] z-10 max-w-[11rem] animate-stat-float rounded-xl border border-white/10 bg-white/5 p-3 shadow-glass backdrop-blur-xl sm:-start-4 sm:max-w-[13rem]"
+        style={{ animationDelay: "-2.5s" }}
+      >
+        <p className="text-[10px] font-medium text-slate-400">تنبيهات اليوم</p>
+        <p className="mt-0.5 text-lg font-bold tabular-nums text-accent-amber sm:text-xl">3</p>
+      </div>
+      <div
+        className="absolute -end-1 bottom-[6%] z-10 max-w-[11rem] animate-stat-float rounded-xl border border-white/10 bg-white/5 p-3 shadow-glass backdrop-blur-xl sm:-end-3 sm:max-w-[13rem]"
+        style={{ animationDelay: "-0.5s" }}
+      >
+        <p className="text-[10px] font-medium text-slate-400">الالتزام بالجودة</p>
+        <p className="mt-0.5 text-lg font-bold tabular-nums text-brand-sky sm:text-xl">
+          98<span className="text-sm">%</span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+const navLinkClass =
+  "text-sm text-slate-400 transition hover:text-brand-sky hover:shadow-[0_0_20px_-4px_rgba(56,189,248,0.35)]";
+const navActiveClass =
+  "relative text-sm text-white after:absolute after:-bottom-3 after:start-0 after:h-0.5 after:w-full after:rounded-full after:bg-gradient-to-r after:from-brand after:to-brand-sky after:shadow-[0_0_16px_rgba(56,189,248,0.55)]";
+
+export default function LandingPage() {
+  const serviceModules = [
+    {
+      title: "مراقبة الامتثال اللحظي",
+      desc: "متابعة مناطق التشغيل عبر الكاميرات والتنبيهات الذكية مع سجل تدقيق قابل للتتبع.",
+      badge: "خدمة أساسية",
+    },
+    {
+      title: "توثيق دورة الوجبة",
+      desc: "تسجيل مراحل الإعداد والتقديم وربط الأحداث بالوقت والموقع لرفع الجاهزية التشغيلية.",
+      badge: "جاهز للتكامل",
+    },
+    {
+      title: "لوحة تقارير تنفيذية",
+      desc: "مؤشرات أداء، إنذارات حرجة، وحالة النظام في واجهة واحدة مناسبة لفرق الإدارة والميدان.",
+      badge: "قرارات أسرع",
+    },
+  ];
+
+  const readinessSteps = [
+    {
+      title: "1) تهيئة المواقع والمطابخ",
+      detail: "تعريف الفروع ومناطق العمل وتوزيع الصلاحيات لكل فريق تشغيل.",
+    },
+    {
+      title: "2) ربط المصادر والأنظمة",
+      detail: "الربط مع الكاميرات وقاعدة البيانات وتوحيد قنوات التنبيه والمتابعة.",
+    },
+    {
+      title: "3) تشغيل ومتابعة يومية",
+      detail: "قياس المؤشرات، إدارة البلاغات، وتحديث الحالة التشغيلية لحظيًا.",
+    },
+  ];
+
+  return (
+    <div className="min-h-screen bg-surface text-slate-100 antialiased">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(37,99,235,0.18),transparent)]" />
+
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0F172A]/80 shadow-lg shadow-black/20 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-3 py-3 sm:gap-4 sm:px-6 lg:px-8">
+          <Link to="/" className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-brand-sky text-xs font-bold text-white shadow-lg shadow-brand/30 sm:h-10 sm:w-10 sm:text-sm">
+              S
+            </span>
+            <span className="truncate text-base font-bold tracking-tight text-white sm:text-lg">SKA</span>
+          </Link>
+
+          <nav className="hidden flex-1 items-center justify-center gap-4 md:flex lg:gap-8">
+            <Link to="/" className={navActiveClass}>
+              الرئيسية
+            </Link>
+            <a href="#analytics" className={navLinkClass}>
+              التحليلات
+            </a>
+            <a href="#alerts" className={navLinkClass}>
+              التنبيهات
+            </a>
+            <a href="#reports" className={navLinkClass}>
+              التقارير
+            </a>
+            <a href="#settings" className={navLinkClass}>
+              الإعدادات
+            </a>
+          </nav>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <Link
+              to="/register"
+              className="inline-flex min-h-[44px] min-w-[7.5rem] items-center justify-center rounded-xl border border-white/15 bg-[rgba(15,23,42,0.72)] px-3 text-xs font-semibold text-slate-100 backdrop-blur-md transition hover:border-brand-sky/40 hover:bg-[#1a2644] sm:min-w-0 sm:px-4 sm:text-sm"
+            >
+              إنشاء حساب
+            </Link>
+            <Link
+              to="/login"
+              className="inline-flex min-h-[44px] min-w-[7.5rem] items-center justify-center rounded-xl bg-brand px-3 text-xs font-semibold text-white shadow-md shadow-brand/30 transition hover:bg-blue-600 hover:shadow-glow-sm sm:min-w-0 sm:px-4 sm:text-sm"
+            >
+              تسجيل الدخول
+            </Link>
+          </div>
+        </div>
+        <nav className="flex gap-3 overflow-x-auto overscroll-x-contain border-t border-white/5 px-3 py-2.5 [-webkit-overflow-scrolling:touch] md:hidden">
+          <Link to="/" className={`shrink-0 ${navActiveClass} after:-bottom-2`}>
+            الرئيسية
+          </Link>
+          <a href="#analytics" className={`shrink-0 ${navLinkClass}`}>
+            التحليلات
+          </a>
+          <a href="#alerts" className={`shrink-0 ${navLinkClass}`}>
+            التنبيهات
+          </a>
+          <a href="#reports" className={`shrink-0 ${navLinkClass}`}>
+            التقارير
+          </a>
+          <a href="#settings" className={`shrink-0 ${navLinkClass}`}>
+            الإعدادات
+          </a>
+        </nav>
+      </header>
+
+      <main>
+        <section className="relative overflow-hidden pb-16 pt-8 sm:pb-20 sm:pt-12 lg:pb-24 lg:pt-16" aria-label="المقدمة">
+          <div className="absolute inset-0 overflow-hidden">
+            <div className="absolute inset-0 hero-bg-zoom">
+              <div className="absolute inset-0 hero-parallax-deep">
+                <div className="absolute inset-0 hero-premium-base" />
+              </div>
+              <div className="absolute inset-0 hero-parallax-mid">
+                <div className="absolute inset-0 hero-premium-mesh hero-mesh-anim" />
+              </div>
+              <div className="absolute inset-0 hero-parallax-mid">
+                <div className="absolute inset-0 opacity-50 hero-grid-lines" />
+              </div>
+              <div className="absolute inset-0 hero-parallax-deep">
+                <div className="hero-orb hero-orb-a" />
+                <div className="hero-orb hero-orb-b" />
+                <div className="hero-orb hero-orb-c" />
+              </div>
+            </div>
+          </div>
+          <div className="pointer-events-none absolute inset-0 z-[1] hero-vignette" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-24 hero-bottom-bleed sm:h-28" />
+
+          <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass-lg backdrop-blur-xl sm:p-6 md:p-8 lg:rounded-3xl lg:p-10 xl:p-12">
+              <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-12 xl:gap-16">
+                <div className="order-2 text-start lg:order-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-sky/90 sm:text-sm">
+                    Smart Kitchen Analytics
+                  </p>
+                  <h1 className="mt-4 text-3xl font-extrabold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl xl:text-[3.25rem] xl:leading-[1.15]">
+                    نظام SKA للرقابة والتوثيق الذكي للمطابخ
+                  </h1>
+                  <p className="mt-5 max-w-xl text-sm leading-relaxed text-slate-400 sm:text-base">
+                    لوحة مراقبة حديثة للمطابخ الاحترافية: رؤية ذكاء اصطناعي، تنبيهات
+                    فورية، وتوثيق أدق — بتجربة SaaS راقية وواجهة عربية كاملة.
+                  </p>
+                  <div className="mt-8 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:flex-wrap sm:gap-4">
+                    <Link
+                      to="/register"
+                      className="inline-flex min-h-[48px] items-center justify-center rounded-xl border-2 border-white/20 bg-[rgba(15,23,42,0.72)] px-8 text-sm font-semibold text-white backdrop-blur-md transition hover:border-brand-sky/50 hover:bg-[#1a2644] hover:shadow-glow-sm sm:min-h-[50px]"
+                    >
+                      إنشاء حساب
+                    </Link>
+                    <Link
+                      to="/login"
+                      className="inline-flex min-h-[48px] items-center justify-center rounded-xl bg-brand px-8 text-sm font-semibold text-white shadow-lg shadow-brand/40 transition hover:bg-blue-600 hover:shadow-[0_0_40px_-8px_rgba(37,99,235,0.55)] sm:min-h-[50px]"
+                    >
+                      الدخول للمنصة
+                    </Link>
+                    <a
+                      href="#services"
+                      className="inline-flex min-h-[48px] items-center justify-center rounded-xl border-2 border-white/20 bg-[rgba(15,23,42,0.72)] px-8 text-sm font-semibold text-white backdrop-blur-md transition hover:border-brand-sky/50 hover:bg-[#1a2644] hover:shadow-glow-sm sm:min-h-[50px]"
+                    >
+                      استعراض الخدمات
+                    </a>
+                  </div>
+                </div>
+
+                <div className="order-1 lg:order-2">
+                  <KitchenVisualMock />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="analytics" className="scroll-mt-24 border-t border-white/5 px-4 py-10 sm:px-6 sm:py-12 lg:px-8 lg:py-14">
+          <div className="mx-auto mb-6 max-w-7xl rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl sm:p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-sky/90">منصة خدمة تشغيلية</p>
+            <h2 className="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl">
+              SKA كمنصة رقابة وتشغيل جاهزة للإنتاج
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-slate-400">
+              ليست مجرد واجهة تجريبية: تم تصميم SKA كبنية منصة متكاملة تجمع التسجيل، إدارة المستخدمين،
+              لوحة تشغيل مركزية، وخدمات مراقبة الجودة في تجربة واحدة.
+            </p>
+          </div>
+
+          <div className="mx-auto mb-8 grid max-w-7xl gap-4 lg:grid-cols-3">
+            {serviceModules.map((module) => (
+              <article
+                key={module.title}
+                className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl transition hover:border-white/20"
+              >
+                <span className="inline-flex rounded-full border border-brand-sky/30 bg-brand-sky/10 px-2.5 py-1 text-[11px] font-semibold text-brand-sky">
+                  {module.badge}
+                </span>
+                <h3 className="mt-3 text-base font-bold text-white">{module.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-slate-400">{module.desc}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-5 text-start sm:mb-6">
+              <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">لوحة تشغيل مباشرة</h2>
+            </div>
+
+            <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                { title: "إجمالي الأطباق", value: "1,248", delta: "+12%", icon: IconDish, tone: "text-accent-green" },
+                { title: "التنبيهات النشطة", value: "3", delta: "تحتاج متابعة", icon: IconBell, tone: "text-accent-amber" },
+                { title: "الالتزام بالجودة", value: "98%", delta: "+5%", icon: IconChart, tone: "text-brand-sky" },
+                { title: "معاملات اليوم", value: "320", delta: "+18%", icon: IconCamera, tone: "text-brand" },
+              ].map((m, i) => (
+                <article
+                  key={m.title}
+                  className={`landing-card-enter group relative overflow-hidden rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-white/20 ${i === 0 ? "landing-card-enter-d1" : i === 1 ? "landing-card-enter-d2" : i === 2 ? "landing-card-enter-d3" : "landing-card-enter-d4"}`}
+                >
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-sky/10 to-transparent opacity-60" />
+                  <div className="relative flex items-center justify-between gap-3">
+                    <m.icon className={`h-7 w-7 ${m.tone}`} />
+                    <span className={`text-xs font-semibold ${m.tone}`}>{m.delta}</span>
+                  </div>
+                  <p className="relative mt-3 text-xs text-slate-400">{m.title}</p>
+                  <p className="relative mt-1 text-3xl font-bold tabular-nums text-white">{m.value}</p>
+                </article>
+              ))}
+            </div>
+
+            <div id="dashboard-preview" className="grid gap-6 lg:grid-cols-12">
+              <article className="landing-step-enter landing-step-enter-d1 rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl lg:col-span-7">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h3 className="text-lg font-bold text-white">نظرة عامة على الأداء</h3>
+                  <span className="rounded-lg border border-white/10 bg-[#0B1327]/80 px-2 py-1 text-[10px] text-slate-400">آخر 7 أيام</span>
+                </div>
+                <div className="relative h-56 overflow-hidden rounded-xl border border-white/10 bg-[#020617]/70 p-4 sm:h-64">
+                  <div className="absolute inset-0 opacity-25 hero-grid-lines" />
+                  <svg viewBox="0 0 100 40" className="relative h-full w-full">
+                    <defs>
+                      <linearGradient id="lineGrad" x1="0" x2="1" y1="0" y2="0">
+                        <stop offset="0%" stopColor="#2563EB" />
+                        <stop offset="100%" stopColor="#38BDF8" />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d="M2 34 C12 30, 18 22, 26 25 C34 28, 40 15, 48 18 C56 21, 62 12, 70 14 C78 16, 86 8, 98 4"
+                      fill="none"
+                      stroke="url(#lineGrad)"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d="M2 34 C12 30, 18 22, 26 25 C34 28, 40 15, 48 18 C56 21, 62 12, 70 14 C78 16, 86 8, 98 4 L98 40 L2 40 Z"
+                      fill="url(#lineGrad)"
+                      opacity="0.18"
+                    />
+                  </svg>
+                </div>
+              </article>
+
+              <article id="alerts" className="landing-step-enter landing-step-enter-d2 rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl lg:col-span-3">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h3 className="text-lg font-bold text-white">آخر التنبيهات</h3>
+                  <span className="text-xs text-brand-sky">عرض الكل</span>
+                </div>
+                <ul className="space-y-2.5">
+                  {[
+                    ["انخفاض في درجة حرارة الثلاجة", "منذ 10 دقائق", "bg-accent-red"],
+                    ["دخول غير مصرح به", "منذ 25 دقيقة", "bg-accent-amber"],
+                    ["انتهاء صلاحية منتج", "منذ ساعة", "bg-brand-sky"],
+                  ].map(([title, time, dot]) => (
+                    <li key={title} className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm text-slate-200">{title}</p>
+                        <span className={`mt-1 h-2 w-2 rounded-full ${dot}`} />
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{time}</p>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+
+              <article className="landing-step-enter landing-step-enter-d3 rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl lg:col-span-2">
+                <h3 className="mb-4 text-lg font-bold text-white">حالة الأنظمة</h3>
+                <ul className="space-y-2.5">
+                  {["الكاميرات", "أجهزة الاستشعار", "قاعدة البيانات", "الخوادم"].map((label) => (
+                    <li key={label} className="flex items-center justify-between rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-2.5">
+                      <span className="text-sm text-slate-300">{label}</span>
+                      <span className="flex items-center gap-1.5 text-xs font-semibold text-accent-green">
+                        <span className="h-2 w-2 rounded-full bg-accent-green shadow-[0_0_10px_rgba(34,197,94,0.65)]" />
+                        متصل
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            </div>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                "أمان عالي",
+                "توثيق ذكي",
+                "تحليلات فورية",
+                "متوافق مع المعايير",
+              ].map((item, i) => (
+                <div
+                  key={item}
+                  className={`landing-card-enter rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] px-4 py-3 text-center text-sm font-medium text-slate-300 shadow-glass backdrop-blur-xl ${i === 0 ? "landing-card-enter-d1" : i === 1 ? "landing-card-enter-d2" : i === 2 ? "landing-card-enter-d3" : "landing-card-enter-d4"}`}
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="reports" className="scroll-mt-24 border-t border-white/10 px-4 py-10 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-5 text-start sm:mb-6">
+              <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">خطة الجاهزية والتشغيل</h2>
+              <p className="mt-2 text-sm text-slate-400">
+                مسار واضح للانتقال من الإعداد الأولي إلى منصة متابعة يومية قابلة للتوسع.
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {readinessSteps.map((step) => (
+                <article
+                  key={step.title}
+                  className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl"
+                >
+                  <h3 className="text-base font-semibold text-white">{step.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-400">{step.detail}</p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <footer id="settings" className="scroll-mt-24 border-t border-white/10 bg-[#0B1120] px-4 py-12 sm:px-6 sm:py-14 lg:px-8">
+          <div className="mx-auto max-w-7xl">
+            <div className="mb-10 flex flex-col gap-8 border-b border-white/10 pb-10 md:flex-row md:items-start md:justify-between md:gap-12">
+              <div className="max-w-lg">
+                <div className="mb-4 flex items-center gap-2.5">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-brand-sky text-sm font-bold text-white shadow-lg shadow-brand/25">
+                    S
+                  </span>
+                  <span className="text-lg font-bold tracking-tight text-white">SKA</span>
+                </div>
+                <h3 className="mb-2 text-base font-semibold text-white sm:text-lg">حول المنصة</h3>
+                <p className="text-sm leading-relaxed text-slate-400 sm:text-[15px]">
+                  SKA منصة تحليلات مطابخ ذكية تجمع بين الرؤية الحاسوبية والبيانات
+                  التشغيلية لدعم السلامة الغذائية والامتثال وتحسين جودة الخدمة في
+                  بيئات الطهي الاحترافية.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 text-sm">
+                <span className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  روابط سريعة
+                </span>
+                <a
+                  href="#features"
+                  className="w-fit text-slate-400 underline-offset-4 transition hover:text-brand-sky hover:underline"
+                >
+                  المميزات
+                </a>
+                <Link
+                  to="/login"
+                  className="w-fit text-slate-400 underline-offset-4 transition hover:text-brand-sky hover:underline"
+                >
+                  الدخول للمنصة
+                </Link>
+              </div>
+            </div>
+            <p className="text-center text-[13px] text-slate-500">
+              © {new Date().getFullYear()} SKA — Smart Kitchen Analytics
+            </p>
+          </div>
+        </footer>
+      </main>
+    </div>
+  );
+}

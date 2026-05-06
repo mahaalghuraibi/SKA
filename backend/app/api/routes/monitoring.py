@@ -1,0 +1,169 @@
+import logging
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_current_user
+from app.api.rbac import require_roles
+from app.core.config import settings
+from app.db.session import get_db
+from app.models.camera import Camera
+from app.models.monitoring_alert import MonitoringAlert
+from app.models.user import User
+from app.schemas.monitoring import MonitoringAnalyzeResponse, MonitoringCheckOut, MonitoringViolationOut
+from app.services.monitoring_ai_service import analyze_monitoring_frame, monitoring_image_snapshot
+
+router = APIRouter(
+    prefix="/monitoring",
+    tags=["monitoring"],
+    dependencies=[Depends(require_roles("supervisor", "admin"))],
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _ensure_supervisor_branch(current_user: User) -> None:
+    if current_user.role == "supervisor" and current_user.branch_id is None:
+        raise HTTPException(status_code=400, detail="لم يتم تحديد الفرع لهذا الحساب")
+
+
+def _has_recent_duplicate(
+    db: Session,
+    *,
+    tenant_id: int,
+    camera_id: int | None,
+    violation_type: str,
+    since: datetime,
+) -> bool:
+    q = (
+        db.query(MonitoringAlert.id)
+        .filter(
+            MonitoringAlert.tenant_id == tenant_id,
+            MonitoringAlert.violation_type == violation_type,
+            MonitoringAlert.created_at >= since,
+        )
+    )
+    if camera_id is not None:
+        q = q.filter(MonitoringAlert.camera_id == camera_id)
+    else:
+        q = q.filter(MonitoringAlert.camera_id.is_(None))
+    return q.first() is not None
+
+
+@router.post("/analyze-frame", response_model=MonitoringAnalyzeResponse)
+async def analyze_frame(
+    image: UploadFile = File(...),
+    camera_id: int | None = Form(None),
+    camera_name: str | None = Form(None),
+    location: str | None = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MonitoringAnalyzeResponse:
+    _ensure_supervisor_branch(current_user)
+    image_bytes = await image.read()
+    try:
+        payload = analyze_monitoring_frame(
+            image_bytes=image_bytes,
+            content_type=image.content_type,
+            camera_name=(camera_name or "").strip() or None,
+            location=(location or "").strip() or None,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if "يرجى إضافة مفتاح Gemini" in msg or "غير مفعل" in msg:
+            raise HTTPException(status_code=503, detail=msg) from exc
+        if "الصورة غير صالحة" in msg:
+            raise HTTPException(status_code=400, detail=msg) from exc
+        raise HTTPException(status_code=500, detail=msg) from exc
+    except Exception:
+        logger.exception("monitoring analyze unexpected error")
+        raise HTTPException(
+            status_code=500,
+            detail="فشل تحليل الصورة. تحقق من إعدادات الذكاء الاصطناعي.",
+        ) from None
+
+    logger.info(
+        "monitoring parsed provider=%s checks=%s violations=%s",
+        payload.get("provider"),
+        len(payload.get("checks") or []),
+        len(payload.get("violations") or []),
+    )
+
+    cam: Camera | None = None
+    if camera_id is not None:
+        cam = (
+            db.query(Camera)
+            .filter(Camera.id == camera_id, Camera.tenant_id == current_user.tenant_id)
+            .first()
+        )
+        if cam is None:
+            raise HTTPException(status_code=400, detail="الكاميرا غير موجودة")
+
+    eff_name = (camera_name or "").strip() or (cam.name if cam else None)
+    eff_location = (location or "").strip() or (cam.location if cam else None)
+
+    payload["camera_name"] = eff_name
+    payload["location"] = eff_location
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    snapshot = monitoring_image_snapshot(image_bytes)
+    alerts_created = 0
+    cutoff = now - timedelta(seconds=30)
+    inserted_types: set[str] = set()
+    persist_alerts = not settings.MONITORING_AI_DEMO_MODE and str(payload.get("provider") or "") != "demo"
+
+    for v in (payload.get("violations") or []) if persist_alerts else []:
+        if not isinstance(v, dict):
+            continue
+        vtype = str(v.get("type", "")).strip()
+        vconf = int(v.get("confidence", 0) or 0)
+        if not vtype or vconf < 85:
+            continue
+        if vtype in inserted_types:
+            continue
+        inserted_types.add(vtype)
+        if _has_recent_duplicate(
+            db,
+            tenant_id=current_user.tenant_id,
+            camera_id=camera_id,
+            violation_type=vtype,
+            since=cutoff,
+        ):
+            continue
+        row = MonitoringAlert(
+            tenant_id=current_user.tenant_id,
+            branch_id=current_user.branch_id,
+            branch_name=current_user.branch_name,
+            camera_id=camera_id,
+            camera_name=eff_name,
+            location=eff_location,
+            violation_type=vtype,
+            label_ar=str(v.get("label_ar", "")).strip() or vtype,
+            confidence=vconf,
+            reason_ar=str(v.get("reason_ar", "")).strip() or "—",
+            image_data_url=snapshot,
+            status="open",
+            created_at=now,
+        )
+        db.add(row)
+        alerts_created += 1
+
+    if cam is not None:
+        cam.last_analysis_at = now
+        db.add(cam)
+
+    db.commit()
+
+    return MonitoringAnalyzeResponse(
+        status=str(payload.get("status", "ok")),
+        provider=str(payload.get("provider", "")),
+        camera_name=payload.get("camera_name"),
+        location=payload.get("location"),
+        people_count=int(payload.get("people_count", 0) or 0),
+        overall_confidence=int(payload.get("overall_confidence", 0) or 0),
+        needs_review=bool(payload.get("needs_review")),
+        checks=[MonitoringCheckOut(**c) for c in (payload.get("checks") or [])],
+        violations=[MonitoringViolationOut(**c) for c in (payload.get("violations") or [])],
+        alerts_created=alerts_created,
+    )

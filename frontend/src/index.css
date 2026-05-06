@@ -1,0 +1,651 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    overflow-x: clip;
+    background-color: #020617;
+    color: #e2e8f0;
+    padding-inline-start: env(safe-area-inset-left, 0px);
+    padding-inline-end: env(safe-area-inset-right, 0px);
+    padding-block-start: env(safe-area-inset-top, 0px);
+    padding-block-end: env(safe-area-inset-bottom, 0px);
+    background-image:
+      radial-gradient(circle at 15% -10%, rgba(37, 99, 235, 0.2), transparent 40%),
+      radial-gradient(circle at 85% 0%, rgba(56, 189, 248, 0.12), transparent 36%);
+    background-attachment: fixed;
+  }
+
+  @media (max-width: 640px) {
+    body {
+      background-attachment: scroll;
+    }
+  }
+}
+
+.nav-tab {
+  user-select: none;
+  outline: none;
+}
+
+.nav-tab::selection {
+  background: transparent;
+}
+
+/* —— Premium hero motion (CSS only) —— */
+@keyframes hero-gradient-shift {
+  0% {
+    background-position: 0% 40%;
+  }
+  100% {
+    background-position: 100% 60%;
+  }
+}
+
+@keyframes hero-shimmer-slow {
+  0% {
+    transform: translateX(-120%) skewX(-12deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.15;
+  }
+  100% {
+    transform: translateX(120%) skewX(-12deg);
+    opacity: 0;
+  }
+}
+
+@keyframes hero-orb-1 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(4%, -3%) scale(1.05);
+  }
+}
+
+@keyframes hero-orb-2 {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-5%, 4%) scale(1.08);
+  }
+}
+
+@keyframes hero-drift-x {
+  0% {
+    transform: translateX(-8%);
+  }
+  100% {
+    transform: translateX(8%);
+  }
+}
+
+@keyframes hero-drift-y {
+  0% {
+    transform: translateY(-4%);
+  }
+  100% {
+    transform: translateY(4%);
+  }
+}
+
+@keyframes hero-pulse-ring {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes hero-scan {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.06;
+  }
+  90% {
+    opacity: 0.06;
+  }
+  100% {
+    transform: translateX(100vw);
+    opacity: 0;
+  }
+}
+
+@keyframes hero-scan-h {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.08;
+  }
+  100% {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
+}
+
+@keyframes hero-subtle-zoom {
+  0% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1.07);
+  }
+}
+
+@keyframes hero-parallax-deep {
+  0% {
+    transform: translate3d(-1.2%, -0.8%, 0);
+  }
+  100% {
+    transform: translate3d(1.2%, 0.9%, 0);
+  }
+}
+
+@keyframes hero-parallax-mid {
+  0% {
+    transform: translate3d(1.5%, 0.6%, 0);
+  }
+  100% {
+    transform: translate3d(-1.5%, -0.5%, 0);
+  }
+}
+
+@keyframes hero-mesh-shift {
+  0% {
+    opacity: 0.85;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.04) translate3d(-1%, 1%, 0);
+  }
+}
+
+@keyframes hero-live-float {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.88;
+  }
+  50% {
+    transform: translateY(-14px);
+    opacity: 1;
+  }
+}
+
+@keyframes hero-blink-soft {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  55% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes hero-dot-pulse-green {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.45);
+    opacity: 0.85;
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes hero-dot-pulse-red {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.4);
+    opacity: 0.9;
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(248, 113, 113, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes hero-card-sheen {
+  0% {
+    transform: translateX(-120%) skewX(-12deg);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.35;
+  }
+  28% {
+    opacity: 0.08;
+  }
+  100% {
+    transform: translateX(220%) skewX(-12deg);
+    opacity: 0;
+  }
+}
+
+@keyframes landing-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes landing-step-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer utilities {
+  .hero-bg-zoom {
+    transform-origin: 50% 45%;
+    animation: hero-subtle-zoom 38s ease-in-out infinite alternate;
+  }
+
+  .hero-parallax-deep {
+    animation: hero-parallax-deep 52s ease-in-out infinite alternate;
+  }
+
+  .hero-parallax-mid {
+    animation: hero-parallax-mid 36s ease-in-out infinite alternate;
+  }
+
+  .hero-mesh-anim {
+    animation: hero-mesh-shift 28s ease-in-out infinite alternate;
+  }
+
+  .hero-premium-base {
+    background: linear-gradient(
+      160deg,
+      #020617 0%,
+      #0f172a 22%,
+      #111827 48%,
+      #0f172a 72%,
+      #020617 100%
+    );
+    background-size: 240% 240%;
+    animation: hero-gradient-shift 18s ease-in-out infinite alternate;
+  }
+
+  .hero-premium-mesh {
+    background-image:
+      radial-gradient(
+        ellipse 120% 100% at 80% 0%,
+        rgba(37, 99, 235, 0.22),
+        transparent 55%
+      ),
+      radial-gradient(
+        ellipse 90% 80% at 10% 90%,
+        rgba(56, 189, 248, 0.12),
+        transparent 50%
+      ),
+      linear-gradient(
+        180deg,
+        rgba(15, 23, 42, 0.2) 0%,
+        transparent 40%,
+        transparent 60%,
+        rgba(15, 23, 42, 0.45) 100%
+      );
+    transform-origin: center;
+  }
+
+  .hero-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    pointer-events: none;
+  }
+
+  .hero-orb-a {
+    width: min(55vw, 480px);
+    height: min(55vw, 480px);
+    right: -8%;
+    top: 10%;
+    background: rgba(37, 99, 235, 0.35);
+    animation: hero-orb-1 16s ease-in-out infinite;
+  }
+
+  .hero-orb-b {
+    width: min(45vw, 380px);
+    height: min(45vw, 380px);
+    left: -5%;
+    bottom: 15%;
+    background: rgba(56, 189, 248, 0.2);
+    animation: hero-orb-2 18s ease-in-out infinite;
+  }
+
+  .hero-orb-c {
+    width: min(35vw, 280px);
+    height: min(35vw, 280px);
+    left: 35%;
+    top: 45%;
+    background: rgba(99, 102, 241, 0.12);
+    animation: hero-orb-1 20s ease-in-out infinite reverse;
+  }
+
+  .hero-grid-lines {
+    background-image: linear-gradient(
+        rgba(148, 163, 184, 0.05) 1px,
+        transparent 1px
+      ),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+    background-size: 48px 48px;
+    animation: hero-drift-x 65s linear infinite alternate;
+  }
+
+  .hero-shine-sweep {
+    background: linear-gradient(
+      105deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.03) 45%,
+      rgba(56, 189, 248, 0.08) 50%,
+      rgba(255, 255, 255, 0.03) 55%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: hero-shimmer-slow 11s ease-in-out infinite;
+  }
+
+  .hero-vignette {
+    background: radial-gradient(
+      ellipse 82% 65% at 50% 42%,
+      transparent 22%,
+      rgba(2, 6, 23, 0.35) 55%,
+      rgba(2, 6, 23, 0.82) 100%
+    );
+  }
+
+  .hero-depth-frost {
+    background: linear-gradient(
+      180deg,
+      rgba(15, 23, 42, 0.15) 0%,
+      transparent 35%,
+      transparent 65%,
+      rgba(15, 23, 42, 0.25) 100%
+    );
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+
+  .hero-scanline {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .hero-scanline::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 38%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(56, 189, 248, 0.07),
+      rgba(147, 197, 253, 0.04),
+      transparent
+    );
+    animation: hero-scan 18s linear infinite;
+  }
+
+  .hero-scanline-h {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .hero-scanline-h::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 14%;
+    background: linear-gradient(
+      180deg,
+      transparent,
+      rgba(56, 189, 248, 0.06),
+      transparent
+    );
+    animation: hero-scan-h 24s ease-in-out infinite;
+  }
+
+  .hero-float-shape {
+    position: absolute;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+    pointer-events: none;
+    animation: hero-drift-y 25s ease-in-out infinite alternate;
+  }
+
+  .hero-live-chip {
+    animation: hero-live-float 6.5s ease-in-out infinite;
+  }
+
+  .hero-live-chip--d1 {
+    animation-delay: -1.6s;
+  }
+
+  .hero-live-chip--d2 {
+    animation-delay: -3.4s;
+  }
+
+  .hero-live-chip--d3 {
+    animation-delay: -5.1s;
+  }
+
+  .hero-live-chip--d4 {
+    animation-delay: -2.2s;
+  }
+
+  .hero-blink-soft {
+    animation: hero-blink-soft 4.2s ease-in-out infinite;
+  }
+
+  .hero-status-dot--green {
+    animation: hero-dot-pulse-green 2.4s ease-out infinite;
+  }
+
+  .hero-status-dot--red {
+    animation: hero-dot-pulse-red 2s ease-out infinite;
+  }
+
+  .hero-main-card-wrap {
+    position: relative;
+  }
+
+  .hero-main-card-wrap::before {
+    content: "";
+    position: absolute;
+    inset: -20px;
+    z-index: -1;
+    border-radius: 28px;
+    background: radial-gradient(
+      ellipse 70% 60% at 50% 0%,
+      rgba(56, 189, 248, 0.22),
+      rgba(37, 99, 235, 0.18) 45%,
+      transparent 70%
+    );
+    filter: blur(28px);
+    opacity: 0.75;
+    pointer-events: none;
+  }
+
+  .hero-main-card {
+    position: relative;
+    overflow: hidden;
+    box-shadow:
+      0 2px 4px rgba(0, 0, 0, 0.2),
+      0 20px 50px -8px rgba(0, 0, 0, 0.55),
+      0 40px 80px -20px rgba(15, 23, 42, 0.45),
+      0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+  }
+
+  .hero-main-card > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .hero-main-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      105deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.07) 42%,
+      rgba(255, 255, 255, 0.02) 48%,
+      transparent 58%
+    );
+    background-size: 200% 100%;
+    pointer-events: none;
+    animation: hero-card-sheen 9s ease-in-out infinite;
+  }
+
+  .hero-bottom-bleed {
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(2, 6, 23, 0.5) 35%,
+      #020617 85%,
+      #020617 100%
+    );
+  }
+
+  .landing-card-enter {
+    animation: landing-card-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .landing-card-enter-d1 {
+    animation-delay: 0.05s;
+  }
+
+  .landing-card-enter-d2 {
+    animation-delay: 0.1s;
+  }
+
+  .landing-card-enter-d3 {
+    animation-delay: 0.15s;
+  }
+
+  .landing-card-enter-d4 {
+    animation-delay: 0.2s;
+  }
+
+  .landing-step-enter {
+    animation: landing-step-enter 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .landing-step-enter-d1 {
+    animation-delay: 0.04s;
+  }
+
+  .landing-step-enter-d2 {
+    animation-delay: 0.08s;
+  }
+
+  .landing-step-enter-d3 {
+    animation-delay: 0.12s;
+  }
+
+  .landing-step-enter-d4 {
+    animation-delay: 0.16s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-premium-base,
+  .hero-mesh-anim,
+  .hero-bg-zoom,
+  .hero-parallax-deep,
+  .hero-parallax-mid,
+  .hero-grid-lines,
+  .hero-shine-sweep,
+  .hero-scanline::after,
+  .hero-scanline-h::after,
+  .hero-float-shape,
+  .hero-orb-a,
+  .hero-orb-b,
+  .hero-orb-c,
+  .hero-live-chip,
+  .hero-blink-soft,
+  .hero-status-dot--green,
+  .hero-status-dot--red,
+  .hero-main-card::after,
+  .landing-card-enter,
+  .landing-card-enter-d1,
+  .landing-card-enter-d2,
+  .landing-card-enter-d3,
+  .landing-card-enter-d4,
+  .landing-step-enter,
+  .landing-step-enter-d1,
+  .landing-step-enter-d2,
+  .landing-step-enter-d3,
+  .landing-step-enter-d4 {
+    animation: none !important;
+  }
+
+  .hero-live-chip {
+    opacity: 1;
+    transform: none;
+  }
+
+  .landing-card-enter,
+  .landing-step-enter {
+    opacity: 1;
+    transform: none;
+  }
+
+  .animate-stat-float {
+    animation: none !important;
+  }
+}
