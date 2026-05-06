@@ -4,6 +4,7 @@ import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS, USER_INFO_KEY, USER_ROLE_KEY } 
 import { dishSaveErrorMessage } from "../utils/apiError.js";
 import { formatConfidencePercentDisplay } from "../utils/confidence.js";
 import { useDetectDish } from "../hooks/useDetectDish.js";
+import { saveDishRecord } from "../services/dishRecordService.js";
 import {
   formatSaudiDateLine,
   formatSaudiDateTime,
@@ -1389,32 +1390,22 @@ export default function Dashboard() {
         detectResult?.detected ||
         manualDish.trim() ||
         "طبق غير معروف";
-      const payload = {
-        image_url: imageDataUrl,
-        predicted_label: predictedFromAi.slice(0, 255),
-        confirmed_label: confirmed.slice(0, 255),
-        quantity: positiveIntQuantity(quantity),
-        source_entity: (sourceEntity.trim() || "غير محدد").slice(0, 100),
-        employee_id: staffMe?.id ?? null,
-        employee_name: staffMe?.full_name || staffMe?.username || staffMe?.email || null,
-        employee_email: staffMe?.email || null,
-        branch_id: staffMe?.branch_id ?? 1,
-        branch_name: staffMe?.branch_name || "فرع تجريبي",
-        // ISO UTC — satisfies strict APIs; current backend overwrites with server time.
-        recorded_at: new Date().toISOString(),
-      };
-      const res = await fetch(DISHES_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
+      const saveResult = await saveDishRecord({
+        token,
+        imageDataUrl,
+        predictedFromAi,
+        confirmed,
+        quantityValue: positiveIntQuantity(quantity),
+        sourceEntity,
+        staffMe,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        console.error("[dish save] failed", { status: res.status, payload, responseBody: data });
-        setDishNotice({ type: "error", text: dishSaveErrorMessage(res.status, data) });
+      if (!saveResult.ok) {
+        console.error("[dish save] failed", {
+          status: saveResult.status,
+          payload: saveResult.payload,
+          responseBody: saveResult.body,
+        });
+        setDishNotice({ type: "error", text: dishSaveErrorMessage(saveResult.status, saveResult.body) });
         return;
       }
       setToast({
@@ -1422,7 +1413,7 @@ export default function Dashboard() {
         text: "تم حفظ الطبق وإرساله للمراجعة",
       });
       setDishNotice(null);
-      const savedId = data?.id;
+      const savedId = saveResult.data?.id;
       await reloadStaffDishes();
       if (savedId != null) {
         setHighlightRawId(savedId);
