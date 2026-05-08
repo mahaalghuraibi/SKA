@@ -1,20 +1,68 @@
-import StaffProfileAvatar from "../shared/StaffProfileAvatar.jsx";
-import { staffAvatarInitials } from "../../utils/avatarInitials.js";
+import SKALogo from "../SKALogo.jsx";
+import { useEffect, useState } from "react";
 
 export default function DashboardNav({
   role,
   navLinks,
   activeStaffSection,
   activeSection,
+  currentHash,
   mobileNavOpen,
   setMobileNavOpen,
   logout,
   dashboardTitle,
-  staffMe,
 }) {
+  const [liveHash, setLiveHash] = useState(
+    currentHash || (typeof window !== "undefined" ? window.location.hash : "")
+  );
+
+  useEffect(() => {
+    setLiveHash(currentHash || (typeof window !== "undefined" ? window.location.hash : ""));
+  }, [currentHash]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const syncHash = () => setLiveHash(window.location.hash || "");
+    window.addEventListener("hashchange", syncHash);
+    window.addEventListener("popstate", syncHash);
+    window.addEventListener("scroll", syncHash, { passive: true });
+    let rafId = 0;
+    const watchHash = () => {
+      const h = window.location.hash || "";
+      setLiveHash((prev) => (prev === h ? prev : h));
+      rafId = window.requestAnimationFrame(watchHash);
+    };
+    rafId = window.requestAnimationFrame(watchHash);
+    syncHash();
+    return () => {
+      window.removeEventListener("hashchange", syncHash);
+      window.removeEventListener("popstate", syncHash);
+      window.removeEventListener("scroll", syncHash);
+      window.cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  const jumpToSection = (sectionId) => {
+    if (!sectionId || typeof window === "undefined") return;
+    const wantedHash = `#${sectionId}`;
+    if (window.location.hash !== wantedHash) {
+      window.location.hash = wantedHash;
+      setLiveHash(wantedHash);
+    }
+    const scrollNow = () => {
+      const el = document.getElementById(sectionId);
+      if (!el) return false;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      return true;
+    };
+    if (scrollNow()) return;
+    // If section mounts a bit later (async records), retry once.
+    window.setTimeout(scrollNow, 90);
+  };
+
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0F172A]/90 backdrop-blur-xl supports-[backdrop-filter]:bg-[#0F172A]/80">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-3 sm:gap-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0F172A]/90 shadow-[0_8px_30px_-18px_rgba(2,6,23,0.9)] backdrop-blur-xl supports-[backdrop-filter]:bg-[#0F172A]/80">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-2 sm:gap-3 sm:px-6 lg:px-8">
         {/* Left: hamburger + avatar + title */}
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 lg:flex-none">
           <button
@@ -35,35 +83,40 @@ export default function DashboardNav({
               </span>
             )}
           </button>
-          {role === "staff" ? (
-            <StaffProfileAvatar
-              imageUrl={staffMe?.avatar_url}
-              initials={staffAvatarInitials(staffMe?.username, staffMe?.email)}
-              sizeClass="h-9 w-9 sm:h-10 sm:w-10"
-              textClass="text-xs sm:text-sm"
-            />
-          ) : (
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-brand-sky text-xs font-bold text-white shadow-lg shadow-brand/30 sm:h-10 sm:w-10 sm:text-sm">
-              S
+          <SKALogo className="inline-flex" />
+          {role === "staff" ? null : (
+            <span className="hidden rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-medium text-slate-300 md:inline-flex">
+              {dashboardTitle}
             </span>
           )}
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-bold tracking-tight text-white sm:text-base lg:text-lg">
-              {dashboardTitle}
-            </h1>
-            <p className="hidden text-xs text-slate-500 xs:block">SKA Dashboard</p>
-          </div>
         </div>
 
         {/* Desktop nav links */}
-        <nav className="hidden items-center gap-3 lg:flex" aria-label="التنقل الرئيسي">
+        <nav className="hidden flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 lg:flex" aria-label="التنقل الرئيسي">
           {navLinks.map((item) => {
-            const isActive =
+            const normalizeHash = (hash) => (hash === "#notifications" ? "#alerts" : hash);
+            const wantedHash = item.sectionId ? normalizeHash(`#${item.sectionId}`) : "";
+            const normalizedCurrentHash = normalizeHash(liveHash || "");
+            const hashBasedMode = [
+              "#analytics",
+              "#cameras",
+              "#reports",
+              "#dish-reviews",
+              "#alerts",
+              "#employees",
+              "#settings",
+              "#section-dish-doc",
+              "#section-search-filter",
+              "#section-dish-records",
+            ].includes(normalizedCurrentHash);
+            const hashActive = wantedHash && normalizedCurrentHash === wantedHash;
+            const sectionActive =
               item.sectionId != null
                 ? role === "staff"
                   ? activeStaffSection === item.sectionId
                   : activeSection === item.sectionId
                 : false;
+            const isActive = hashBasedMode ? Boolean(hashActive) : Boolean(sectionActive);
             return (
               <a
                 key={item.sectionId || item.href}
@@ -71,18 +124,13 @@ export default function DashboardNav({
                 onClick={(e) => {
                   if (item.sectionId) {
                     e.preventDefault();
-                    const wantedHash = `#${item.sectionId}`;
-                    if (window.location.hash !== wantedHash) {
-                      window.history.replaceState(null, "", wantedHash);
-                    }
-                    document
-                      .getElementById(item.sectionId)
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    jumpToSection(item.sectionId);
                   }
                 }}
-                className={`nav-tab whitespace-nowrap rounded-[12px] px-[18px] py-[10px] text-sm font-medium transition ${
+                aria-current={isActive ? "page" : undefined}
+                className={`nav-tab whitespace-nowrap rounded-[10px] px-3 py-2 text-sm font-medium transition ${
                   isActive
-                    ? "border border-[rgba(56,189,248,0.65)] bg-[rgba(59,130,246,0.18)] text-white shadow-[0_0_12px_rgba(56,189,248,0.25)]"
+                    ? "border border-[rgba(56,189,248,0.55)] bg-[rgba(59,130,246,0.15)] text-white shadow-[0_0_10px_rgba(56,189,248,0.2)]"
                     : "border border-transparent bg-transparent text-[#aaa] hover:bg-[rgba(59,130,246,0.08)] hover:text-white"
                 }`}
               >
@@ -104,7 +152,7 @@ export default function DashboardNav({
           <button
             type="button"
             onClick={logout}
-            className="min-h-[44px] rounded-xl border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-accent-red/20 hover:text-white sm:px-4 sm:text-sm"
+            className="min-h-[40px] rounded-xl border border-accent-red/35 bg-accent-red/10 px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-accent-red/20 hover:text-white sm:px-3.5 sm:text-sm"
           >
             <span className="sm:hidden">خروج</span>
             <span className="hidden sm:inline">تسجيل الخروج</span>
@@ -120,12 +168,29 @@ export default function DashboardNav({
       >
         <div className="mx-auto flex max-w-7xl flex-col gap-1 px-3 py-3 sm:px-6">
           {navLinks.map((item) => {
-            const isActive =
+            const normalizeHash = (hash) => (hash === "#notifications" ? "#alerts" : hash);
+            const wantedHash = item.sectionId ? normalizeHash(`#${item.sectionId}`) : "";
+            const normalizedCurrentHash = normalizeHash(liveHash || "");
+            const hashBasedMode = [
+              "#analytics",
+              "#cameras",
+              "#reports",
+              "#dish-reviews",
+              "#alerts",
+              "#employees",
+              "#settings",
+              "#section-dish-doc",
+              "#section-search-filter",
+              "#section-dish-records",
+            ].includes(normalizedCurrentHash);
+            const hashActive = wantedHash && normalizedCurrentHash === wantedHash;
+            const sectionActive =
               item.sectionId != null
                 ? role === "staff"
                   ? activeStaffSection === item.sectionId
                   : activeSection === item.sectionId
                 : false;
+            const isActive = hashBasedMode ? Boolean(hashActive) : Boolean(sectionActive);
             return (
               <a
                 key={item.sectionId || item.href}
@@ -133,17 +198,12 @@ export default function DashboardNav({
                 onClick={(e) => {
                   if (item.sectionId) {
                     e.preventDefault();
-                    const wantedHash = `#${item.sectionId}`;
-                    if (window.location.hash !== wantedHash) {
-                      window.history.replaceState(null, "", wantedHash);
-                    }
-                    document
-                      .getElementById(item.sectionId)
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    jumpToSection(item.sectionId);
                   }
                   setMobileNavOpen(false);
                 }}
-                className={`nav-tab rounded-[12px] px-[18px] py-[10px] text-sm font-medium transition ${
+                aria-current={isActive ? "page" : undefined}
+                className={`nav-tab rounded-[10px] px-3 py-2 text-sm font-medium transition ${
                   isActive
                     ? "border border-[rgba(56,189,248,0.65)] bg-[rgba(59,130,246,0.18)] text-white shadow-[0_0_12px_rgba(56,189,248,0.25)]"
                     : "border border-transparent bg-transparent text-[#aaa] hover:bg-[rgba(59,130,246,0.08)] hover:text-white"

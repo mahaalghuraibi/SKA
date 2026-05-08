@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import re
+import time
 from typing import Any
 
 from app.core.config import settings
@@ -45,6 +46,7 @@ ALLOWED_DISHES: tuple[str, ...] = (
     "بيتزا",
     "ستيك",
     "ساندويتش",
+    "سمبوسة",
     "بطاطس مقلية",
     # ── Universal ────────────────────────────────────────────────
     "مكرونة",
@@ -57,8 +59,12 @@ ALLOWED_DISHES: tuple[str, ...] = (
 )
 ALLOWED_SET = frozenset(ALLOWED_DISHES)
 
-# Flag needs_review when top-suggestion confidence is below this threshold.
-REVIEW_CONFIDENCE_THRESHOLD = 0.75
+# Flag needs_review when top-suggestion confidence is below this threshold (~45%).
+REVIEW_CONFIDENCE_THRESHOLD = 0.45
+# When the model names a dish but omits confidence / sends 0, avoid misleading 0%.
+MIN_MEANINGFUL_CONFIDENCE = 0.14
+JPEG_QUALITY_DISH = 94
+MAX_IMAGE_EDGE_DISH = 2048
 # Ignore very-low-confidence padded slots when checking protein conflicts.
 CONFLICT_CONFIDENCE_FLOOR = 0.12
 
@@ -93,6 +99,7 @@ DISH_SIMILAR: dict[str, list[str]] = {
     "بيتزا":         ["مكرونة", "ساندويتش", "خبز"],
     "ستيك":          ["كباب", "لحم", "مشويات"],
     "ساندويتش":      ["برجر", "تشيز برجر", "شاورما"],
+    "سمبوسة":        ["ساندويتش", "بطاطس مقلية", "مكرونة"],
     "بطاطس مقلية":  ["ساندويتش", "برجر", "خبز"],
     # Universal
     "مكرونة":        ["بيتزا", "رز", "شوربة"],
@@ -203,6 +210,10 @@ DISH_KEYWORDS: dict[str, frozenset[str]] = {
         "ساندويتش", "سندويتش", "خبز", "حشوة",
         "sandwich", "sub", "bread", "filling", "hoagie", "roll",
     }),
+    "سمبوسة": frozenset({
+        "سمبوسة", "سمبوسك", "ساموسا", "معجنات",
+        "samosa", "sambusa", "sambosak", "fried pastry", "triangular",
+    }),
     "بطاطس مقلية": frozenset({
         "بطاطس", "بطاطا", "مقلية", "ذهبية",
         "fries", "french fries", "chips", "potato", "fried", "golden strips",
@@ -233,6 +244,8 @@ DISH_KEYWORDS: dict[str, frozenset[str]] = {
 
 # Suggestions with similarity below this threshold are replaced with category defaults.
 _MIN_SUGGESTION_SIMILARITY = 0.50
+_MIN_ALT1_CONF = 0.18
+_MIN_ALT2_CONF = 0.12
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -248,6 +261,45 @@ def _normalize_confidence_ratio(value: object) -> float:
     if n > 100.0:
         return 1.0
     return max(0.0, min(1.0, n))
+
+
+def _strong_alt_confidences(top: float, c1_raw: float, c2_raw: float) -> tuple[float, float]:
+    """
+    Return stronger, descending alt confidences based on top confidence level.
+    Keeps suggestions 2/3 meaningful (not near-zero) while remaining realistic.
+    """
+    top = max(0.22, min(1.0, float(top)))
+    c1 = max(0.0, min(1.0, float(c1_raw)))
+    c2 = max(0.0, min(1.0, float(c2_raw)))
+
+    if top >= 0.85:
+        floor1, floor2 = 0.58, 0.46
+    elif top >= 0.70:
+        floor1, floor2 = 0.48, 0.36
+    elif top >= 0.55:
+        floor1, floor2 = 0.36, 0.26
+    else:
+        floor1, floor2 = 0.24, 0.16
+
+    c1_max = max(0.0, top - 0.05)
+    c1 = max(floor1, min(c1_max, c1 if c1 > 0 else top * 0.72))
+
+    c2_max = max(0.0, c1 - 0.05)
+    c2 = max(floor2, min(c2_max, c2 if c2 > 0 else top * 0.56))
+
+    # Keep strict descending order.
+    if c2 >= c1:
+        c2 = max(floor2, c1 - 0.06)
+    return round(c1, 4), round(c2, 4)
+
+
+def _confidence_with_floor(dish_name: str, value: object) -> float:
+    """Avoid reporting 0.0 when the model named a concrete dish but omitted confidence."""
+    c = _normalize_confidence_ratio(value)
+    name = (dish_name or "").strip()
+    if name and name != "غير متأكد" and c <= 0.0:
+        return MIN_MEANINGFUL_CONFIDENCE
+    return c
 
 
 def _map_text_to_allowed_dish(text: str) -> str | None:
@@ -268,6 +320,9 @@ def _map_text_to_allowed_dish(text: str) -> str | None:
     # Pizza
     if any(k in t for k in ("بيتزا", "pizza", "pepperoni", "mozzarella")):
         return "بيتزا"
+    # Samosa / savory pastries (before generic sandwich)
+    if any(k in t for k in ("سمبوسة", "سمبوسك", "samosa", "sambusa", "sambosak")):
+        return "سمبوسة"
     # Steak
     if any(k in t for k in ("ستيك", "steak", "sirloin", "ribeye")):
         return "ستيك"
@@ -342,7 +397,7 @@ def _protein_for_dish(dish_ar: str) -> str:
         return "red_meat"
     if dish_ar == "برياني":
         return "mixed"
-    if dish_ar in {"مكرونة", "سلطة", "شوربة", "رز", "خبز", "بيتزا", "ساندويتش", "بطاطس مقلية", "حلويات", "غير متأكد"}:
+    if dish_ar in {"مكرونة", "سلطة", "شوربة", "رز", "خبز", "بيتزا", "ساندويتش", "سمبوسة", "بطاطس مقلية", "حلويات", "غير متأكد"}:
         return "none"
     return "unknown"
 
@@ -350,7 +405,7 @@ def _protein_for_dish(dish_ar: str) -> str:
 def _parse_json_object(text: str) -> dict[str, Any] | None:
     if not text:
         return None
-    t = text.strip()
+    t = text.strip().replace("\ufeff", "")
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", t, re.IGNORECASE)
     if fence:
         t = fence.group(1).strip()
@@ -359,14 +414,15 @@ def _parse_json_object(text: str) -> dict[str, Any] | None:
         return obj if isinstance(obj, dict) else None
     except json.JSONDecodeError:
         pass
-    start = t.find("{")
-    end = t.rfind("}")
-    if start >= 0 and end > start:
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", t):
+        fragment = t[match.start() :]
         try:
-            obj = json.loads(t[start : end + 1])
-            return obj if isinstance(obj, dict) else None
+            obj, _end = decoder.raw_decode(fragment)
+            if isinstance(obj, dict):
+                return obj
         except json.JSONDecodeError:
-            return None
+            continue
     return None
 
 
@@ -406,10 +462,13 @@ def _protein_conflict_among_suggestions(sugs: list[dict[str, Any]]) -> bool:
 
 def refresh_review_metadata(result: dict[str, Any]) -> dict[str, Any]:
     """Recompute protein_conflict and needs_review after in-place edits (e.g. tenant history)."""
+    llm_review = bool(result.pop("_llm_needs_review", False))
     sugs = result.get("suggestions")
     if not isinstance(sugs, list):
         result["protein_conflict"] = False
-        result["needs_review"] = float(result.get("confidence") or 0) < REVIEW_CONFIDENCE_THRESHOLD
+        result["needs_review"] = (
+            llm_review or float(result.get("confidence") or 0) < REVIEW_CONFIDENCE_THRESHOLD
+        )
         return result
     rows: list[dict[str, Any]] = []
     for item in sugs[:3]:
@@ -426,7 +485,9 @@ def refresh_review_metadata(result: dict[str, Any]) -> dict[str, Any]:
     conflict = _protein_conflict_among_suggestions(rows)
     top_conf = max(0.0, min(1.0, float(result.get("confidence") or 0.0)))
     result["protein_conflict"] = conflict
-    result["needs_review"] = (top_conf < REVIEW_CONFIDENCE_THRESHOLD) or conflict
+    result["needs_review"] = (
+        llm_review or (top_conf < REVIEW_CONFIDENCE_THRESHOLD) or conflict
+    )
     if conflict:
         extra = "تعارض بين بروتينات مختلفة (مثل سمك مع لحم أو سمك مع دجاج) — يرجى الاختيار يدوياً."
         for key in ("visual_reason", "suggestion_reason"):
@@ -493,7 +554,7 @@ def _finalize_result(
         reason_parts.append("لم يتمكن الذكاء الاصطناعي من التعرف على الطبق بدقة — اختر من الاقتراحات أو أدخل الاسم يدوياً.")
     elif raw_conf < REVIEW_CONFIDENCE_THRESHOLD:
         reason_parts.append(
-            f"ثقة الاقتراح الأول {raw_conf * 100:.1f}% أقل من 75% — يُنصَح بالمراجعة اليدوية."
+            f"ثقة الاقتراح الأول {raw_conf * 100:.1f}% أقل من {REVIEW_CONFIDENCE_THRESHOLD * 100:.0f}% — يُنصَح بالمراجعة اليدوية."
         )
     if protein_conflict:
         reason_parts.append(
@@ -524,32 +585,69 @@ def _finalize_result(
 
 def _llm_suggestion_rows(data: dict[str, Any], default_reason: str) -> list[dict[str, Any]]:
     """
-    Extract suggestion rows from Gemini's JSON response.
-    New format: dish_name + confidence at top level, suggestions array always 3 items.
-    Falls back gracefully if suggestions array is missing or malformed.
+    Extract suggestion rows from Gemini JSON.
+    Supports:
+      - New: dish_name, confidence (0–100), category, suggestions: ["...","..."], needs_review, visual_evidence
+      - Legacy: suggestions as objects with name, confidence, reason
     """
-    top_dish = _validate_dish_name(str(data.get("dish_name", "")))
-    top_conf = _normalize_confidence_ratio(data.get("confidence", 0.0))
-    top_reason = str(data.get("visual_reason") or "").strip() or default_reason
+    category = str(data.get("category") or "").strip()
+    visual_ev = str(data.get("visual_evidence") or data.get("visual_reason") or "").strip()
+    if visual_ev and category:
+        default_reason = f"{visual_ev} — التصنيف: {category}"
+    elif category:
+        default_reason = f"{category}. {visual_ev}".strip() if visual_ev else category
+    elif visual_ev:
+        default_reason = visual_ev
+    default_reason = default_reason.strip() or "تحليل بصري عبر Gemini Vision"
+
+    raw_top = str(data.get("dish_name", "")).strip()
+    top_dish = _validate_dish_name(raw_top)
+    top_conf = _confidence_with_floor(top_dish, data.get("confidence", 0.0))
+    top_reason = default_reason
 
     rows: list[dict[str, Any]] = []
-
     raw_s = data.get("suggestions")
+
     if isinstance(raw_s, list):
         for item in raw_s:
-            if not isinstance(item, dict):
-                continue
-            nm = _validate_dish_name(str(item.get("name", item.get("dish_name", ""))))
-            try:
-                cf = float(item.get("confidence", 0.0))
-            except (TypeError, ValueError):
-                cf = 0.0
-            rs = str(item.get("reason", "")).strip() or default_reason
-            rows.append({"name": nm, "confidence": cf, "reason": rs})
+            if isinstance(item, str):
+                nm = _validate_dish_name(item)
+                if not nm:
+                    continue
+                rows.append({"name": nm, "confidence": 0.0, "reason": top_reason})
+            elif isinstance(item, dict):
+                nm = _validate_dish_name(str(item.get("name", item.get("dish_name", ""))))
+                if not nm:
+                    continue
+                cf = _confidence_with_floor(nm, item.get("confidence", 0.0))
+                rs = str(item.get("reason", "")).strip() or top_reason
+                rows.append({"name": nm, "confidence": cf, "reason": rs})
 
-    # Ensure dish_name is always represented (may already be suggestions[0])
-    if not rows or rows[0]["name"] != top_dish:
+    rows = _dedupe_suggestions_keep_best_conf(rows)
+
+    # String-only suggestions: assign descending confidences from model top_conf
+    if rows and all(float(r.get("confidence") or 0) <= 0.0 for r in rows) and top_conf > 0:
+        for i, r in enumerate(rows[:5]):
+            factor = max(0.28, 1.0 - i * 0.12)
+            r["confidence"] = round(max(0.05, top_conf * factor), 4)
+
+    if not rows:
+        rows = [{"name": top_dish, "confidence": top_conf, "reason": top_reason}]
+    elif rows[0]["name"] != top_dish and top_dish != "غير متأكد":
         rows.insert(0, {"name": top_dish, "confidence": top_conf, "reason": top_reason})
+    elif rows[0]["name"] != top_dish and top_dish == "غير متأكد":
+        # Promote best real guess when the model was uncertain
+        real = [r for r in rows if r["name"] != "غير متأكد"]
+        if real:
+            top_dish = real[0]["name"]
+            top_conf = _confidence_with_floor(
+                top_dish,
+                real[0].get("confidence", 0.0) or (top_conf if top_conf > 0 else MIN_MEANINGFUL_CONFIDENCE),
+            )
+            top_reason = str(real[0].get("reason") or top_reason)
+            rows = [{**real[0], "name": top_dish, "confidence": top_conf}] + [
+                r for r in rows if r["name"] not in {top_dish, "غير متأكد"}
+            ]
 
     rows.sort(key=lambda r: -float(r["confidence"]))
     return rows[:5]
@@ -595,13 +693,30 @@ def _enforce_category_coherence(rows: list[dict[str, Any]]) -> list[dict[str, An
             seen.add(alt)
             fill_conf = max(0.03, fill_conf - conf_step)
 
-    fallback = [d for d in ALLOWED_DISHES if d != "غير متأكد" and d not in seen]
+    # If category list is not enough, fill from globally nearest dishes (still visually close).
+    fallback = sorted(
+        [d for d in ALLOWED_DISHES if d != "غير متأكد" and d not in seen],
+        key=lambda d: -_similarity_score(top_name, d),
+    )
     fi = 0
     while len(result) < 3:
         name = fallback[fi] if fi < len(fallback) else "رز"
-        result.append({"name": name, "confidence": 0.0, "reason": "—"})
+        conf = max(_MIN_ALT2_CONF, min(max(0.2, top_conf * 0.45), max(0.03, top_conf - 0.15)))
+        result.append({"name": name, "confidence": round(conf, 4), "reason": f"الأقرب بصرياً إلى {top_name}"})
         seen.add(name)
         fi += 1
+
+    # Guarantee exactly 3 strong descending suggestions.
+    top = float(result[0].get("confidence") or top_conf or 0.0)
+    top = max(0.22, min(1.0, top))
+    if len(result) >= 3:
+        c1, c2 = _strong_alt_confidences(
+            top,
+            float(result[1].get("confidence") or 0.0),
+            float(result[2].get("confidence") or 0.0),
+        )
+        result[1]["confidence"] = c1
+        result[2]["confidence"] = c2
 
     return result[:3]
 
@@ -713,17 +828,33 @@ def _rank_suggestions_by_similarity(
                 existing.add(alt)
                 fill_conf = max(0.02, fill_conf - conf_step)
 
-    # Final safety pad with plain-rice or first known dish
-    fallback_names = [d for d in ALLOWED_DISHES if d != "غير متأكد"]
+    # Final safety pad with nearest known dishes (not random global order).
+    fallback_names = sorted(
+        [d for d in ALLOWED_DISHES if d != "غير متأكد"],
+        key=lambda d: -_similarity_score(top_dish if top_dish != "غير متأكد" else "برجر", d),
+    )
     fi = 0
     existing_names = {r["name"] for r in result}
     while len(result) < 3:
         while fi < len(fallback_names) and fallback_names[fi] in existing_names:
             fi += 1
         name = fallback_names[fi] if fi < len(fallback_names) else "رز"
-        result.append({"name": name, "confidence": 0.0, "reason": "—"})
+        seed = max(_MIN_ALT2_CONF, min(max(0.18, top_conf * 0.5), max(0.05, top_conf - 0.2)))
+        result.append({"name": name, "confidence": round(seed, 4), "reason": f"بديل قريب من {top_dish}"})
         existing_names.add(name)
         fi += 1
+
+    # Keep exactly 3 strong descending confidences.
+    top = max(0.22, min(1.0, float(result[0].get("confidence") or top_conf or 0.0)))
+    result[0]["confidence"] = round(top, 4)
+    if len(result) > 2:
+        c1, c2 = _strong_alt_confidences(
+            top,
+            float(result[1].get("confidence") or 0.0),
+            float(result[2].get("confidence") or 0.0),
+        )
+        result[1]["confidence"] = c1
+        result[2]["confidence"] = c2
 
     logger.info(
         "Dish rank: top=%s suggestions=%s",
@@ -739,184 +870,420 @@ def _rank_suggestions_by_similarity(
 _PRODUCTION_MIN_IMAGE_BYTES = 8_000
 
 
+def _dish_gemini_model_candidates() -> list[str]:
+    """Configured model first, then supported fallbacks (2.5 before 2.0; no deprecated 1.5 variants)."""
+    configured = (settings.DISH_GEMINI_MODEL or settings.GEMINI_VISION_MODEL or "").strip()
+    # Only models confirmed available on the current v1beta / v1 API endpoint.
+    # gemini-1.5-* have been retired from this endpoint — do not add them back.
+    fallbacks = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+    ]
+    out: list[str] = []
+    for m in ([configured] if configured else []) + fallbacks:
+        if m and m not in out:
+            out.append(m)
+    return out or ["gemini-2.5-flash", "gemini-2.0-flash"]
+
+
+def _prepare_dish_image_for_gemini(image_bytes: bytes) -> tuple[bytes, int, int]:
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    w, h = img.size
+    max_edge = MAX_IMAGE_EDGE_DISH
+    if max(w, h) > max_edge:
+        scale = max_edge / float(max(w, h))
+        nw = max(1, int(round(w * scale)))
+        nh = max(1, int(round(h * scale)))
+        img = img.resize((nw, nh), Image.Resampling.LANCZOS)
+        w, h = nw, nh
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=JPEG_QUALITY_DISH, optimize=True)
+    return buf.getvalue(), w, h
+
+
+def _extract_gemini_response_text(resp: Any) -> str:
+    text = (getattr(resp, "text", None) or "").strip()
+    if text:
+        return text
+    candidates = getattr(resp, "candidates", None) or []
+    if candidates:
+        content = getattr(candidates[0], "content", None)
+        parts = getattr(content, "parts", None) or [] if content else []
+        return "".join(getattr(p, "text", None) or "" for p in parts).strip()
+    return ""
+
+
+def _gemini_error_kind(exc: Exception | None) -> str | None:
+    """Classify Gemini client errors for clearer operator messaging."""
+    if exc is None:
+        return None
+    text = f"{exc} {getattr(exc, 'message', '')}".lower()
+    if any(
+        s in text
+        for s in (
+            "api key not valid",
+            "invalid api key",
+            "api_key_invalid",
+            "incorrect api key",
+            "permission_denied",
+            "leaked api key",
+        )
+    ):
+        return "invalid_key"
+    if any(s in text for s in ("resource_exhausted", "quota exceeded", "quota", "billing")):
+        return "quota"
+    return None
+
+
+_DISH_VISION_MSG_INVALID_KEY = (
+    "مفتاح Google Gemini غير صالح أو مرفوض. افتح ملف backend/.env وضع مفتاحاً صحيحاً في "
+    "GEMINI_API_KEY أو DISH_GEMINI_API_KEY (من https://aistudio.google.com/apikey — بلا مسافات قبل/بعد المفتاح). "
+    "أعد تشغيل الخادم بعد الحفظ."
+)
+_DISH_VISION_MSG_QUOTA = (
+    "حصّة Gemini نفدت أو يجب تفعيل الفوترة في حساب Google AI. راجع console.cloud.google.com ثم أعد المحاولة."
+)
+
+
+def _dish_vision_service_failure(kind: str) -> dict[str, Any]:
+    msg = _DISH_VISION_MSG_INVALID_KEY if kind == "invalid_key" else _DISH_VISION_MSG_QUOTA
+    return _finalize_result(
+        visual_reason=msg,
+        vision_model="none",
+        suggestion_rows=list(_FALLBACK_SUGGESTIONS),
+        detected_classes=[f"error:{kind}"],
+        top_dish_override="غير متأكد",
+        top_conf_override=0.0,
+        experimental=True,
+    )
+
+
+def _fallback_via_roboflow(image_bytes: bytes, failure_reason: str) -> dict[str, Any] | None:
+    """
+    Use existing Roboflow pipeline as a resilient fallback when Gemini is unavailable.
+    Keeps /detect-dish contract unchanged.
+    """
+    try:
+        from app.services.vision_service import detect_dish as detect_dish_roboflow
+    except Exception as exc:
+        logger.warning("Dish vision fallback: vision_service import failed: %s", exc)
+        return None
+
+    try:
+        rf = detect_dish_roboflow(image_bytes=image_bytes, filename="")
+    except Exception as exc:
+        logger.warning("Dish vision fallback: roboflow detect failed: %s", exc)
+        return None
+
+    top_name = _validate_dish_name(str(rf.get("dish_name") or rf.get("suggested_name") or "غير متأكد"))
+    raw_conf = _confidence_with_floor(top_name, rf.get("confidence", 0.0))
+
+    # Start from Roboflow hints, then force close-category ranking using same production logic.
+    suggested = rf.get("suggested_options")
+    labels = suggested if isinstance(suggested, list) else []
+    candidates: list[dict[str, Any]] = []
+    for idx, item in enumerate(labels[:5]):
+        name = _validate_dish_name(str(item))
+        if not name:
+            continue
+        factor = max(0.30, 1.0 - idx * 0.14)
+        candidates.append(
+            {
+                "name": name,
+                "confidence": round(max(0.04, raw_conf * factor), 4),
+                "reason": "Fallback عبر Roboflow Vision",
+            }
+        )
+    # Always include the detected top dish as anchor for similarity ranking.
+    candidates.insert(
+        0,
+        {
+            "name": top_name,
+            "confidence": raw_conf,
+            "reason": "Fallback عبر Roboflow Vision",
+        },
+    )
+    candidates = _dedupe_suggestions_keep_best_conf(candidates)
+
+    final_top, rows = _rank_suggestions_by_similarity(
+        top_name,
+        raw_conf,
+        "Fallback عبر Roboflow Vision",
+        candidates,
+    )
+    # Hard guarantee: enforce same-category coherence in fallback path as well.
+    rows = _enforce_category_coherence(rows)
+    if rows:
+        final_top = rows[0]["name"]
+
+    out = _finalize_result(
+        visual_reason=f"{failure_reason} تم التبديل تلقائيًا إلى Roboflow كخطة بديلة.",
+        vision_model="roboflow_fallback",
+        suggestion_rows=rows,
+        detected_classes=[str(x) for x in (rf.get("detected_classes") or [])][:8],
+        top_dish_override=final_top,
+        top_conf_override=raw_conf,
+        experimental=bool(rf.get("experimental", True)),
+    )
+    out["needs_review"] = bool(out.get("needs_review")) or raw_conf < REVIEW_CONFIDENCE_THRESHOLD
+    logger.info(
+        "Dish vision fallback: provider=roboflow dish=%s confidence=%.3f needs_review=%s",
+        out.get("dish_name"),
+        float(out.get("confidence") or 0.0),
+        out.get("needs_review"),
+    )
+    return out
+
+
 def _classify_gemini(image_bytes: bytes, production_mode: bool = False) -> dict[str, Any] | None:
-    key = (settings.GEMINI_API_KEY or "").strip()
+    key = (settings.DISH_GEMINI_API_KEY or settings.GEMINI_API_KEY or "").strip()
     if not key:
-        logger.warning("Dish vision: GEMINI_API_KEY not set")
+        logger.warning("Dish vision: DISH_GEMINI_API_KEY not set")
         return None
 
     try:
         from google import genai
         from google.genai import types as genai_types
-        from PIL import Image
     except ImportError:
-        logger.warning("Dish vision: google-genai or Pillow not installed")
-        return None
-
-    client = genai.Client(api_key=key)
-    model_name = (settings.GEMINI_VISION_MODEL or "gemini-flash-lite-latest").strip()
-
-    # Decode + re-encode as JPEG for reliable Gemini input
-    img_pil = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    w, h = img_pil.size
-    buf = io.BytesIO()
-    img_pil.save(buf, format="JPEG", quality=92)
-    jpeg_bytes = buf.getvalue()
-    img_part = genai_types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg")
-
-    logger.info(
-        "Dish vision [%s]: model=%s image=%dx%d jpeg_bytes=%d",
-        "PRODUCTION" if production_mode else "dev",
-        model_name, w, h, len(jpeg_bytes),
-    )
-
-    allowed_list = "\n".join(f"- {d}" for d in ALLOWED_DISHES if d != "غير متأكد")
-
-    prompt = f"""You are a professional restaurant food recognition AI. You identify dishes from ANY cuisine: Arabic, Gulf, Western, fast food, pizza, pasta, steak, burgers, seafood, desserts, etc.
-
-TASK: Look at this food image carefully — color, texture, shape, cooking method, visible ingredients — and identify the dish.
-
-OUTPUT FORMAT (JSON ONLY — no markdown, no text outside JSON):
-{{
-  "dish_name": "<Arabic name from the approved list>",
-  "confidence": <0.0 to 1.0>,
-  "visual_reason": "<one Arabic sentence describing exactly what you see>",
-  "suggestions": [
-    {{"name": "<must equal dish_name>", "confidence": <highest>, "reason": "<visual description in Arabic>"}},
-    {{"name": "<realistic alternative from same food category>", "confidence": <lower>, "reason": "<reason in Arabic>"}},
-    {{"name": "<realistic alternative from same food category>", "confidence": <lower>, "reason": "<reason in Arabic>"}}
-  ]
-}}
-
-APPROVED DISH NAMES — use these exact Arabic names:
-{allowed_list}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-VISUAL RECOGNITION GUIDE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-BURGERS & SANDWICHES:
-• برجر       — round beef patty in sesame bun with lettuce/tomato/sauce layers
-• تشيز برجر  — same as برجر but with melted yellow/orange cheese clearly visible
-• برجر دجاج  — fried or grilled chicken patty in bun (lighter color than beef)
-• ساندويتش   — sliced-bread sandwich with filling (not burger-style bun)
-→ If you see a burger: suggest تشيز برجر, برجر دجاج, ساندويتش — NEVER suggest rice or kabsa
-
-PIZZA & PASTA:
-• بيتزا    — round flat dough base with tomato sauce, melted cheese, toppings; cut in wedges
-• مكرونة   — noodles/spaghetti/penne in sauce (tomato, cream, or white sauce)
-→ If you see pizza: suggest مكرونة, ساندويتش, خبز — NEVER suggest rice dishes
-
-STEAK & WESTERN MEAT:
-• ستيك — thick grilled beef slab with grill marks, dark brown surface, served on plate
-→ If you see steak: suggest كباب, لحم, مشويات
-
-FAST FOOD SIDES:
-• بطاطس مقلية — thin golden/yellow fried potato sticks, elongated strips
-
-ARABIC GRILLED:
-• كباب      — ground meat shaped on skewers, charcoal-grilled, long cylindrical shape, dark brown
-• كفتة      — similar to كباب but thicker cylinders, may not have visible skewer
-• مشويات    — ASSORTED PLATTER with multiple grilled types together (skewers + chicken + various meats)
-• دجاج مشوي — half or quarter chicken with browned/charred grilled skin
-• شاورما    — thinly sliced meat served in flatbread wrap or piled strips on a plate
-
-ARABIC RICE (visually similar — differentiate carefully):
-• كبسة دجاج/كبسة لحم — RED-ORANGE rice from spices, whole chicken or lamb pieces on top
-• مندي       — GOLDEN/LIGHT BROWN rice, slow-cooked, full chicken or lamb on top, lighter color
-• رز بخاري   — YELLOW/BROWN rice with shredded orange carrots visible, chicken on side
-• برياني     — LAYERED rice with multiple colors (yellow+white+orange), dense Indian-style spices
-• مقلوبة     — rice dish with visible vegetables (eggplant/potato) on TOP after flipping
-• رز         — plain WHITE or beige rice with no distinctive toppings/color
-
-ARABIC STUFFED:
-• ورق عنب — small GREEN cylindrical rolls (2-4cm), arranged in rows, olive/dark green color
-• محشي     — WHOLE stuffed vegetables clearly visible (zucchini/peppers/tomatoes)
-
-SEAFOOD:
-• سمك    — whole fish or fillet clearly recognizable as fish shape
-• روبيان — pink/orange shrimp or prawns clearly visible
-
-SOUPS, SALADS & SIDES:
-• سلطة         — bowl of RAW mixed vegetables (lettuce, tomato, cucumber); no dominant protein
-• شوربة         — liquid-based dish in a bowl (broth, soup, stew)
-• خبز           — plain bread/flatbread/pita/naan as the main item
-• حلويات        — dessert items: cake, ice cream, pastry, chocolate-based sweets
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CATEGORY COHERENCE RULES (STRICT — NEVER MIX CATEGORIES):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Burgers/sandwiches → suggest from: برجر، تشيز برجر، برجر دجاج، ساندويتش
-Pizza/pasta/Italian → suggest from: بيتزا، مكرونة، ساندويتش
-Steak/grilled meat → suggest from: ستيك، كباب، لحم، مشويات
-Arabic grilled      → suggest from: كباب، كفتة، مشويات، دجاج مشوي، شاورما
-Arabic rice         → suggest from: كبسة دجاج، كبسة لحم، مندي، رز بخاري، برياني، مقلوبة
-Seafood             → suggest from: سمك، روبيان، مشويات
-Stuffed             → suggest from: ورق عنب، محشي، مقلوبة
-Desserts            → suggest from: حلويات، خبز، مكرونة
-
-❌ FORBIDDEN CROSS-CATEGORY SUGGESTIONS:
-- burger with rice/kabsa
-- pizza with kabsa/mandi
-- salad with grilled meat
-- soup with burgers
-- steak with rice dishes
-- pasta with grape leaves
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONFIDENCE RULES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-0.85–1.0 → clear, unambiguous visual features, fully certain
-0.65–0.84 → very likely but minor visual ambiguity exists
-< 0.65   → use dish_name = "غير متأكد", give 3 real alternatives from closest visual category
-
-ADDITIONAL PRODUCTION RULES:
-- Do NOT return "خبز" for a burger bun — identify the burger type
-- Do NOT return "لحم" for a steak — use "ستيك"
-- Do NOT return "دجاج" for a chicken burger — use "برجر دجاج"
-- Do NOT return "رز" if you see colored/spiced rice — identify the specific rice dish
-- Do NOT return "مكرونة" for pizza or vice versa
-- Confidence must decrease: suggestions[0] ≥ suggestions[1] ≥ suggestions[2]"""
+        logger.warning("Dish vision: google-genai not installed")
+        genai = None  # type: ignore[assignment]
+        genai_types = None  # type: ignore[assignment]
 
     try:
-        resp = client.models.generate_content(model=model_name, contents=[prompt, img_part])
+        jpeg_bytes, w, h = _prepare_dish_image_for_gemini(image_bytes)
     except Exception as exc:
-        logger.warning("Dish vision: Gemini request failed: %s", exc)
+        logger.warning("Dish vision: image decode failed: %s", exc)
         return None
 
-    text = (getattr(resp, "text", None) or "").strip()
-    logger.info("Dish vision: response_len=%d preview=%.200s", len(text), text)
+    allowed_list = "\n".join(f"- {d}" for d in ALLOWED_DISHES if d != "غير متأكد")
+    prompt = f"""أنت محلل رؤية مطاعم متخصص: مهمتك قراءة صورة طعام حقيقية واختيار أفضل تطابق من القائمة المعتمدة.
 
-    data = _parse_json_object(text)
+مهم جداً:
+- راجع الصورة المرفقة (إدخال بصري)؛ يجب أن تستند إجابتك فقط على ما يظهر فيها.
+- أخرِج كائناً JSON واحداً فقط، بدون markdown وبدون أي نص خارج الأقواس.
+- جميع قيم النصوص بالعربية (أو أسماء الأطباق كما في القائمة حرفياً).
+
+شكل الإخراج الإلزامي:
+{{
+  "dish_name": "<اسم من القائمة المعتمدة — أفضل تخمين عند الغموض>",
+  "confidence": <عدد صحيح من 0 إلى 100 يعكس وضوح الأدلة البصرية، ليس دائماً 0 أو 100>,
+  "category": "<فئة قصيرة بالعربية، مثل: فاست فود، مشويات، أرز ومندي، حلويات>",
+  "suggestions": ["نفس dish_name حرفياً", "بديل 2 من نفس العائلة البصرية", "بديل 3"],
+  "needs_review": <true أو false — true عند ثقة أقل من 45 أو صورة ضعيفة أو اختلاط أطباق>,
+  "visual_evidence": "<جملة واحدة تصف اللون/الشكل/المكونات الظاهرة>"
+}}
+
+القائمة المعتمدة (استخدم هذه الحروف كما هي):
+{allowed_list}
+
+إرشادات تمييز سريعة:
+• بيتزا: قرص عجين مستدير بصلصة وجبن وطبقات؛ لا تخلطها مع مكرونة.
+• برجر/تشيز برجر/برجر دجاج: خبز برجر وطبقة لحم أو دجاج؛ لا تسمِ «خبز» فقط.
+• مكرونة/باستا: قطع معكرونة مع صلصة؛ ليست بيتزا.
+• سمبوسة/ساموسا: معجنات مثلثة غالباً مقلية بحشوة.
+• ورق عنب: لفائف صغيرة خضراء.
+• أطباق أرز: تمييز كبسة حمراء، مندي أفتح، برياني طبقات، رز أبيض سادة.
+
+قواعد الثقة (0–100):
+• 85–100: أدلة بصرية واضحة جداً
+• 60–84: مرجح بقوة مع غموض طفيف
+• 45–59: مرجح لكن يحتاج مراجعة (needs_review=true)
+• أقل من 45: اختر الأقرب من القائمة مع needs_review=true؛ لا تستخدم 0 كثقة إذا اخترت اسماً حقيقياً — عبّر عن الغموض بقيمة 25–44.
+
+قواعد الاقتراحات:
+- suggestions ثلاثة عناصر مميزة من القائمة، والأول يساوي dish_name تماماً.
+- لا تخلط فئات لا علاقة لها ببعض (مثلاً برجر مع كبسة).
+
+أعد JSON فقط."""
+
+    model_candidates = _dish_gemini_model_candidates()
+    logger.info(
+        "Dish vision [%s]: models_to_try=%s jpeg_out=%dx%d jpeg_bytes=%d quality=%d max_edge=%d",
+        "PRODUCTION" if production_mode else "dev",
+        model_candidates,
+        w,
+        h,
+        len(jpeg_bytes),
+        JPEG_QUALITY_DISH,
+        MAX_IMAGE_EDGE_DISH,
+    )
+
+    t0 = time.perf_counter()
+    resp_text = ""
+    used_model = ""
+    last_err: Exception | None = None
+
+    if genai is not None and genai_types is not None:
+        # 15-second per-model timeout; no SDK-level retry (rely on model cascade instead).
+        _http_opts = genai_types.HttpOptions(timeout=15_000, retry_options=None)
+        client = genai.Client(api_key=key, http_options=_http_opts)
+        try:
+            safety_off = [
+                genai_types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
+                genai_types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
+                genai_types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
+                genai_types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
+            ]
+            gen_config = genai_types.GenerateContentConfig(safety_settings=safety_off)
+        except Exception:
+            gen_config = None
+
+        for model_name in model_candidates:
+            try:
+                img_part = genai_types.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg")
+                if gen_config is not None:
+                    resp = client.models.generate_content(
+                        model=model_name,
+                        contents=[prompt, img_part],
+                        config=gen_config,
+                    )
+                else:
+                    resp = client.models.generate_content(
+                        model=model_name,
+                        contents=[prompt, img_part],
+                    )
+                resp_text = _extract_gemini_response_text(resp)
+                used_model = model_name
+                if resp_text:
+                    last_err = None
+                    logger.info("Dish vision: model=%s responded OK", model_name)
+                    break
+            except Exception as exc:
+                last_err = exc
+                logger.warning(
+                    "Dish vision: gemini (google-genai) failed model=%s: %s — %s",
+                    model_name,
+                    type(exc).__name__,
+                    exc,
+                )
+                if _gemini_error_kind(exc) == "invalid_key":
+                    # Invalid/leaked key won't recover by trying other models.
+                    break
+                continue
+
+    if not resp_text:
+        try:
+            import google.generativeai as legacy_genai
+            from PIL import Image
+
+            legacy_genai.configure(api_key=key)
+            pil_image = Image.open(io.BytesIO(jpeg_bytes)).convert("RGB")
+            safety_settings = [
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            ]
+            for model_name in model_candidates:
+                try:
+                    model = legacy_genai.GenerativeModel(model_name=model_name, safety_settings=safety_settings)
+                    resp = model.generate_content([prompt, pil_image])
+                    used_model = model_name
+                    resp_text = str(getattr(resp, "text", "") or "").strip()
+                    if resp_text:
+                        last_err = None
+                        break
+                except Exception as exc:
+                    last_err = exc
+                    logger.warning(
+                        "Dish vision: gemini (legacy) failed model=%s: %s — %s",
+                        model_name,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    if _gemini_error_kind(exc) == "invalid_key":
+                        break
+                    continue
+        except ImportError:
+            pass
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+    if not resp_text:
+        kind = _gemini_error_kind(last_err)
+        if kind:
+            logger.error("Dish vision: Gemini request blocked kind=%s err=%s", kind, last_err)
+            reason = _DISH_VISION_MSG_INVALID_KEY if kind == "invalid_key" else _DISH_VISION_MSG_QUOTA
+            fb = _fallback_via_roboflow(image_bytes, reason)
+            if fb is not None:
+                return fb
+            return _dish_vision_service_failure(kind)
+        fb = _fallback_via_roboflow(
+            image_bytes,
+            "تعذر الحصول على استجابة من Gemini.",
+        )
+        if fb is not None:
+            return fb
+        logger.error(
+            "Dish vision: no model response after tries=%d last_err=%s latency_ms=%.1f",
+            len(model_candidates),
+            type(last_err).__name__ if last_err else "none",
+            elapsed_ms,
+        )
+        return None
+
+    logger.info(
+        "Dish vision: SUCCESS model=%s latency_ms=%.1f response_chars=%d",
+        used_model,
+        elapsed_ms,
+        len(resp_text),
+    )
+    logger.debug("Dish vision: raw_response=%s", resp_text)
+
+    data = _parse_json_object(resp_text)
     if not data:
-        logger.warning("Dish vision: JSON parse failed. raw=%.400s", text)
+        logger.warning("Dish vision: JSON parse failed. raw=%.800s", resp_text)
         return None
 
-    default_reason = str(data.get("visual_reason") or "").strip() or "تصنيف Gemini Vision"
+    default_reason = (
+        str(data.get("visual_evidence") or data.get("visual_reason") or "").strip()
+        or "تصنيف Gemini Vision"
+    )
     rows = _llm_suggestion_rows(data, default_reason)
 
     top_dish = rows[0]["name"] if rows else "غير متأكد"
-    top_conf = _normalize_confidence_ratio(rows[0]["confidence"] if rows else 0.0)
+    top_conf = _confidence_with_floor(top_dish, rows[0]["confidence"] if rows else 0.0)
     top_reason = (rows[0]["reason"] if rows else default_reason) or default_reason
 
     final_top, ranked_rows = _rank_suggestions_by_similarity(top_dish, top_conf, top_reason, rows)
 
+    if final_top == "غير متأكد" and ranked_rows:
+        guess = str(ranked_rows[0].get("name", "")).strip()
+        if guess and guess != "غير متأكد":
+            final_top = guess
+            top_conf = _confidence_with_floor(final_top, ranked_rows[0].get("confidence", top_conf))
+
     logger.info(
-        "Dish vision: RESULT dish=%s confidence=%.3f needs_review=%s suggestions=%s",
+        "Dish vision: parsed dish=%s conf=%.4f llm_needs_review=%s ranked=%s",
         final_top,
         top_conf,
-        top_conf < REVIEW_CONFIDENCE_THRESHOLD or final_top == "غير متأكد",
-        [(r["name"], round(float(r["confidence"]), 2)) for r in ranked_rows],
+        data.get("needs_review"),
+        [(r["name"], round(float(r["confidence"]), 4)) for r in ranked_rows],
     )
 
-    return _finalize_result(
+    out = _finalize_result(
         visual_reason=default_reason,
         vision_model="gemini",
         suggestion_rows=ranked_rows,
-        detected_classes=[final_top, f"gemini_conf={top_conf:.3f}", f"model={model_name}"],
+        detected_classes=[final_top, f"gemini_conf={top_conf:.3f}", f"model={used_model}"],
         top_dish_override=final_top,
         top_conf_override=top_conf,
     )
+    if isinstance(data.get("needs_review"), bool) and data.get("needs_review"):
+        out["_llm_needs_review"] = True
+    logger.info(
+        "Dish vision: RESULT model=%s dish=%s confidence=%.0f%% needs_review=%s latency_ms=%.0f",
+        used_model,
+        final_top,
+        top_conf * 100,
+        out.get("needs_review"),
+        elapsed_ms,
+    )
+    return out
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -948,7 +1315,7 @@ def classify_dish_image(image_bytes: bytes) -> dict[str, Any]:
             experimental=True,
         )
 
-    gemini_key_set = bool((settings.GEMINI_API_KEY or "").strip())
+    gemini_key_set = bool((settings.DISH_GEMINI_API_KEY or settings.GEMINI_API_KEY or "").strip())
 
     # Production mode: reject images that are clearly not real photos (too small).
     if production_mode and len(image_bytes) < _PRODUCTION_MIN_IMAGE_BYTES:
@@ -974,9 +1341,9 @@ def classify_dish_image(image_bytes: bytes) -> dict[str, Any]:
     )
 
     if not gemini_key_set:
-        logger.error("classify_dish_image: GEMINI_API_KEY is not configured")
+        logger.error("classify_dish_image: DISH_GEMINI_API_KEY is not configured")
         return _finalize_result(
-            visual_reason="مفتاح Gemini API غير مُعيَّن — تحقق من backend/.env.",
+            visual_reason="مفتاح Gemini API الخاص بتعرف الأطباق غير مُعيَّن — تحقق من backend/.env.",
             vision_model="none",
             suggestion_rows=list(_FALLBACK_SUGGESTIONS),
             detected_classes=[],
@@ -991,18 +1358,27 @@ def classify_dish_image(image_bytes: bytes) -> dict[str, Any]:
         logger.error("classify_dish_image: unhandled exception: %s", exc, exc_info=True)
         out = None
 
-    if out and str(out.get("vision_model") or "") not in ("", "none"):
-        dish = out.get("dish_name")
-        conf = out.get("confidence")
-        nr   = out.get("needs_review")
-        logger.info(
-            "classify_dish_image: SUCCESS dish=%s confidence=%s needs_review=%s",
-            dish, conf, nr,
-        )
-        if production_mode and nr:
+    if out is not None:
+        if str(out.get("vision_model") or "") == "gemini":
+            dish = out.get("dish_name")
+            conf = out.get("confidence")
+            nr = out.get("needs_review")
             logger.info(
-                "PRODUCTION_AI_MODE: needs_review=True — dish=%s conf=%s — do NOT auto-approve",
-                dish, conf,
+                "classify_dish_image: SUCCESS dish=%s confidence=%s needs_review=%s",
+                dish,
+                conf,
+                nr,
+            )
+            if production_mode and nr:
+                logger.info(
+                    "PRODUCTION_AI_MODE: needs_review=True — dish=%s conf=%s — do NOT auto-approve",
+                    dish,
+                    conf,
+                )
+        else:
+            logger.warning(
+                "classify_dish_image: vision unavailable — %s",
+                str(out.get("visual_reason") or "")[:400],
             )
         return out
 

@@ -237,7 +237,7 @@ class DetectDishResponse(BaseModel):
     visual_reason: str = ""
     needs_review: bool = Field(
         default=False,
-        description="True when top confidence is below 75% or protein conflict among suggestions.",
+        description="True when top confidence is below ~45% or protein conflict among suggestions.",
     )
     protein_conflict: bool = Field(
         default=False,

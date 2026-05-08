@@ -1,11 +1,32 @@
+## Dependency directories
 node_modules/
+frontend/node_modules/
+backend/.venv/
 .venv/
 .venv*/
 venv/
-__pycache__/
+
+## Build outputs
 dist/
 build/
+frontend/dist/
+frontend/build/
+
+## Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+## Local environment and secrets
 .env
+.env.*
+backend/.env
+
+## Local databases
 *.sqlite3
 *.db
+
+## OS/editor noise
 .DS_Store

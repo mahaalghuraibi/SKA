@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import SKALogo from "../components/SKALogo.jsx";
 
 const REGISTER_URL = "/api/v1/auth/users";
 const BRANCH_OPTIONS = [
@@ -19,7 +20,6 @@ function normalizeError(detail) {
 export default function RegisterPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -36,7 +36,14 @@ export default function RegisterPage() {
 
     const safeEmail = email.trim();
     const safeName = name.trim();
-    const safeUsername = username.trim().toLowerCase();
+    const emailLocal = safeEmail.includes("@") ? safeEmail.split("@")[0] : safeEmail;
+    const fromName = safeName
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^\p{L}\p{N}_-]/gu, "")
+      .slice(0, 20);
+    const derivedUsername = (emailLocal || fromName || `user_${Date.now()}`).toLowerCase().slice(0, 30);
+    const safeUsername = derivedUsername || `user_${Date.now()}`;
     const numericTenant = 1;
     const selectedBranch = BRANCH_OPTIONS.find((b) => b.id === Number(branchId)) || BRANCH_OPTIONS[0];
 
@@ -46,10 +53,6 @@ export default function RegisterPage() {
     }
     if (!safeEmail) {
       setError("البريد الإلكتروني مطلوب.");
-      return;
-    }
-    if (!safeUsername) {
-      setError("اسم المستخدم مطلوب.");
       return;
     }
     if (password.length < 6) {
@@ -122,24 +125,22 @@ export default function RegisterPage() {
       </div>
       <div className="pointer-events-none absolute inset-0 hero-vignette" />
 
-      <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/80 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-6">
-          <Link to="/" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-brand-sky text-sm font-bold text-white shadow-lg shadow-brand/25">
-              S
-            </span>
-            <span className="font-bold text-white">SKA</span>
+      <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/78 shadow-[0_8px_24px_-16px_rgba(2,6,23,0.95)] backdrop-blur-2xl">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-brand-sky/45 to-transparent" />
+        <div className="relative mx-auto flex max-w-7xl items-center justify-between gap-3 px-3 py-2.5 sm:px-6 lg:px-8">
+          <Link to="/" className="flex items-center">
+            <SKALogo />
           </Link>
-          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-4">
+          <div className="flex items-center justify-end gap-2 sm:gap-3">
             <Link
               to="/"
-              className="text-sm font-medium text-slate-400 transition hover:text-brand-sky"
+              className="rounded-md px-1.5 py-1 text-sm font-medium text-slate-400 transition hover:text-brand-sky"
             >
               الرئيسية
             </Link>
             <Link
               to="/login"
-              className="text-sm font-medium text-slate-400 transition hover:text-brand-sky"
+              className="inline-flex min-h-[40px] items-center justify-center rounded-xl border border-white/15 bg-[rgba(15,23,42,0.72)] px-3 text-xs font-semibold text-slate-100 backdrop-blur-md transition hover:border-brand-sky/40 hover:bg-[#1a2644] sm:px-4 sm:text-sm"
             >
               تسجيل الدخول
             </Link>
@@ -148,10 +149,10 @@ export default function RegisterPage() {
       </header>
 
       <div className="relative z-10 flex flex-1 items-center justify-center px-3 py-8 sm:px-4 sm:py-12">
-        <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass-lg backdrop-blur-xl sm:rounded-3xl sm:p-8">
-          <h1 className="text-xl font-bold text-white sm:text-2xl">إنشاء حساب جديد</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            أدخل بياناتك لفتح حساب جديد في منصة SKA
+        <div className="w-full max-w-xl rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass-lg backdrop-blur-xl sm:rounded-3xl sm:p-8 lg:p-9">
+          <h1 className="text-xl font-bold text-white sm:text-2xl">مرحبًا بك في منصة SKA</h1>
+          <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+            أنشئ حسابك وابدأ تجربة الرقابة والتوثيق الذكي للمطابخ
           </p>
 
           {error ? (
@@ -175,7 +176,7 @@ export default function RegisterPage() {
           <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <div>
               <label htmlFor="name" className="mb-1.5 block text-sm font-semibold text-slate-300">
-                الاسم
+                الاسم الكامل
               </label>
               <input
                 id="name"
@@ -186,23 +187,6 @@ export default function RegisterPage() {
                 required
                 className="w-full rounded-xl border border-white/10 bg-[#020617]/60 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-brand-sky/50 focus:outline-none focus:ring-2 focus:ring-brand/30"
                 placeholder="الاسم الكامل"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="username" className="mb-1.5 block text-sm font-semibold text-slate-300">
-                اسم المستخدم
-              </label>
-              <input
-                id="username"
-                name="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                className="w-full rounded-xl border border-white/10 bg-[#020617]/60 px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:border-brand-sky/50 focus:outline-none focus:ring-2 focus:ring-brand/30"
-                placeholder="maha_user"
-                dir="ltr"
               />
             </div>
 
@@ -278,8 +262,7 @@ export default function RegisterPage() {
                 className="w-full rounded-xl border border-white/10 bg-[#020617]/60 px-3 py-2.5 text-sm text-white focus:border-brand-sky/50 focus:outline-none focus:ring-2 focus:ring-brand/30"
               >
                 <option value="staff">موظف</option>
-                <option value="supervisor">سوبر فايزر</option>
-                <option value="admin">admin</option>
+                <option value="supervisor">مشرف</option>
               </select>
             </div>
 

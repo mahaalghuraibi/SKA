@@ -41,15 +41,36 @@ export function useDetectDish({
             ? normalized.suggestedName
             : normalized.alternatives[0] || normalized.detected);
         setDetectResult(normalized);
+
+        const visionDown =
+          normalized.visionModel === "none" || String(normalized.visionModel || "").trim() === "";
+        const backendHint = (
+          normalized.visualReason ||
+          normalized.suggestionReason ||
+          ""
+        ).trim();
+        const configOrNetworkFailure =
+          visionDown &&
+          normalized.detected === UNKNOWN_DISH_TEXT &&
+          backendHint.length >= 8;
+
         const skipAutofill = normalized.proteinConflict || normalized.needsReviewLowConf;
-        if (skipAutofill) {
+
+        if (configOrNetworkFailure) {
+          setSelectedAlternative("");
+          setManualDish("");
+          setDishNotice({
+            type: "error",
+            text: backendHint,
+          });
+        } else if (skipAutofill) {
           setSelectedAlternative("");
           setManualDish("");
           setDishNotice({
             type: "warning",
             text: normalized.proteinConflict
               ? "تعارض بين الاقتراحات (مثل سمك ولحم أو سمك ودجاج). اختر أحد الخيارات أو اكتب الاسم يدويًا — لم يُملأ الحقل تلقائيًا."
-              : "ثقة الاقتراح أقل من 75%. اختر أحد الخيارات أو اكتب اسم الطبق يدويًا — لم يُملأ الحقل تلقائيًا.",
+              : "ثقة الاقتراح أقل من 45%. راجع الخيارات أو اكتب اسم الطبق يدويًا — لم يُملأ الحقل تلقائيًا.",
           });
         } else {
           setSelectedAlternative(autofillDishName);

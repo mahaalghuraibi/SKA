@@ -13,9 +13,9 @@ export function staffStatusText(status, needsReview) {
 }
 
 export function staffStatusTone(statusText) {
-  if (statusText === "تم الاعتماد" || statusText === "موثوق") return "text-emerald-300";
-  if (statusText === "مرفوض") return "text-red-300";
-  return "text-orange-300";
+  if (statusText === "تم الاعتماد" || statusText === "موثوق") return "text-teal-200/95";
+  if (statusText === "مرفوض") return "text-rose-200/90";
+  return "text-amber-200/90";
 }
 
 /** True when the string is a renderable <img src> (same-origin /api/, blob:, data:, http(s):). */

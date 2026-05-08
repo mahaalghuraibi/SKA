@@ -14,7 +14,7 @@ export default function StaffProfileAvatar({
   const show = isRenderableImageSrc(imageUrl) && !failed;
   return (
     <div
-      className={`${sizeClass} flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-brand/50 to-brand-sky/40 text-center font-bold text-white ring-2 ring-white/15`}
+      className={`${sizeClass} flex shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-[#1d4ed8]/90 via-brand/80 to-sky-500/70 text-center font-bold text-white shadow-[0_12px_40px_-12px_rgba(37,99,235,0.5)] ring-2 ring-white/25`}
       aria-hidden={show}
     >
       {show ? (

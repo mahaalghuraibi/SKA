@@ -110,6 +110,100 @@ function Spinner({ className = "h-5 w-5 border-2 border-white/25 border-t-white"
   );
 }
 
+function SkeletonPulse({ className = "" }) {
+  return (
+    <div
+      className={`animate-pulse rounded-xl bg-gradient-to-l from-white/[0.04] to-white/[0.09] ${className}`}
+      aria-hidden
+    />
+  );
+}
+
+function downloadUtf8Csv(filename, headerRow, rows) {
+  const esc = (v) => {
+    const s = v == null ? "" : String(v);
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lines = [headerRow.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))];
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** CSS-only relative bars from API numbers (no chart library). */
+function SupervisorAnalyticsBars({ loading, supervisorSummary }) {
+  if (loading) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-[#060d1f]/45 p-4 sm:p-5">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">توزيع المؤشرات</p>
+        <div className="space-y-3">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <SkeletonPulse key={i} className="h-9 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (!supervisorSummary) {
+    return (
+      <div className="rounded-2xl border border-dashed border-white/10 bg-[#060d1f]/30 p-6 text-center text-sm text-slate-500">
+        لا توجد بيانات كافية لعرض الرسم.
+      </div>
+    );
+  }
+  const s = supervisorSummary;
+  const n = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const rows = [
+    { label: "إجمالي الأطباق", value: n(s.total_dishes), barClass: "from-sky-500/90 to-sky-400/70" },
+    { label: "هذا الأسبوع", value: n(s.dishes_week), barClass: "from-emerald-500/85 to-emerald-400/65" },
+    { label: "معلّق للمراجعة", value: n(s.pending_reviews), barClass: "from-amber-500/85 to-amber-400/60" },
+    { label: "مخالفات المراقبة", value: n(s.violations_count), barClass: "from-rose-500/85 to-rose-400/60" },
+    { label: "التنبيهات", value: n(s.alerts_count), barClass: "from-violet-500/80 to-violet-400/55" },
+    {
+      label: "أطباق اليوم",
+      value: n(s.dishes_today ?? s.dishes_count),
+      barClass: "from-cyan-500/80 to-cyan-400/55",
+    },
+  ];
+  const maxVal = Math.max(1, ...rows.map((r) => r.value));
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#060d1f]/45 p-4 sm:p-5">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand-sky/90">مخطط نسبي</p>
+          <p className="mt-0.5 text-sm text-slate-400">مقارنة أحجام المؤشرات وفق البيانات الحالية من الخادم.</p>
+        </div>
+      </div>
+      <ul className="space-y-3.5" aria-label="مؤشرات أداء نسبية">
+        {rows.map((r) => {
+          const pct = Math.round((r.value / maxVal) * 100);
+          return (
+            <li key={r.label}>
+              <div className="mb-1 flex items-center justify-between gap-2 text-xs text-slate-400">
+                <span className="font-medium text-slate-300">{r.label}</span>
+                <span className="tabular-nums text-slate-500">{r.value}</span>
+              </div>
+              <div className="h-2.5 overflow-hidden rounded-full bg-[#020617]/80 ring-1 ring-white/5">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-l ${r.barClass} transition-all duration-500`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /** Same-origin API paths (Vite proxy /api) + remote URLs + blob + data URLs. */
 function isRenderableImageSrc(src) {
   if (typeof src !== "string") return false;
@@ -173,6 +267,7 @@ const SUPERVISOR_SECTION_IDS = {
   reviews: "dish-reviews",
   reports: "reports",
   employees: "employees",
+  settings: "settings",
 };
 
 const SUPERVISOR_HASH_TO_SECTION = {
@@ -182,7 +277,77 @@ const SUPERVISOR_HASH_TO_SECTION = {
   "#dish-reviews": SUPERVISOR_SECTION_IDS.reviews,
   "#reports": SUPERVISOR_SECTION_IDS.reports,
   "#employees": SUPERVISOR_SECTION_IDS.employees,
+  "#settings": SUPERVISOR_SECTION_IDS.settings,
 };
+
+const ADMIN_SETTINGS_STORAGE_KEY = "ska_admin_settings";
+const REVIEW_PAGE_SIZE = 8;
+const EMPLOYEE_PAGE_SIZE = 6;
+const ALERTS_PAGE_STEP = 8;
+const ADMIN_SETTINGS_DEFAULTS = {
+  ai: {
+    minConfidence: 70,
+    violations: {
+      mask: true,
+      gloves: true,
+      headCover: true,
+      wetFloor: true,
+      containers: true,
+    },
+  },
+  alerts: {
+    enabled: true,
+    defaultSeverity: "medium",
+  },
+  reports: {
+    pdfEnabled: false,
+    excelEnabled: false,
+  },
+  system: {
+    platformName: "SKA Smart Kitchen Analytics",
+    defaultLanguage: "العربية",
+    timezone: "Asia/Riyadh",
+  },
+};
+
+function normalizeAdminSettingsShape(input) {
+  const obj = input && typeof input === "object" ? input : {};
+  const aiObj = obj.ai && typeof obj.ai === "object" ? obj.ai : {};
+  const violationsObj = aiObj.violations && typeof aiObj.violations === "object" ? aiObj.violations : {};
+  const alertsObj = obj.alerts && typeof obj.alerts === "object" ? obj.alerts : {};
+  const reportsObj = obj.reports && typeof obj.reports === "object" ? obj.reports : {};
+  const systemObj = obj.system && typeof obj.system === "object" ? obj.system : {};
+  const minConfidenceNum = Number(aiObj.minConfidence);
+  const severity = String(alertsObj.defaultSeverity || "").trim().toLowerCase();
+  const validSeverity = severity === "low" || severity === "medium" || severity === "high";
+  return {
+    ai: {
+      minConfidence: Number.isFinite(minConfidenceNum)
+        ? Math.max(0, Math.min(100, Math.round(minConfidenceNum)))
+        : ADMIN_SETTINGS_DEFAULTS.ai.minConfidence,
+      violations: {
+        mask: Boolean(violationsObj.mask),
+        gloves: Boolean(violationsObj.gloves),
+        headCover: Boolean(violationsObj.headCover),
+        wetFloor: Boolean(violationsObj.wetFloor),
+        containers: Boolean(violationsObj.containers),
+      },
+    },
+    alerts: {
+      enabled: Boolean(alertsObj.enabled),
+      defaultSeverity: validSeverity ? severity : ADMIN_SETTINGS_DEFAULTS.alerts.defaultSeverity,
+    },
+    reports: {
+      pdfEnabled: Boolean(reportsObj.pdfEnabled),
+      excelEnabled: Boolean(reportsObj.excelEnabled),
+    },
+    system: {
+      platformName: String(systemObj.platformName || "").trim() || ADMIN_SETTINGS_DEFAULTS.system.platformName,
+      defaultLanguage: ADMIN_SETTINGS_DEFAULTS.system.defaultLanguage,
+      timezone: ADMIN_SETTINGS_DEFAULTS.system.timezone,
+    },
+  };
+}
 
 function staffSectionFromHash(hashValue) {
   const h = String(hashValue || "").trim();
@@ -290,8 +455,124 @@ function monitoringStatusLabelAr(status) {
 function monitoringAlertStatusAr(status) {
   const s = String(status || "").toLowerCase();
   if (s === "open") return "مفتوح";
+  if (s === "new") return "جديد";
   if (s === "resolved") return "تمت المعالجة";
   return status || "—";
+}
+
+/** Stored `violation_type` from monitoring_alerts → category for admin reports */
+const VIOLATION_REPORT_CATEGORY_ORDER = [
+  { key: "no_mask", label: "الكمامة" },
+  { key: "no_gloves", label: "القفازات" },
+  { key: "no_headcover", label: "غطاء الرأس" },
+  { key: "trash_location", label: "الحاويات" },
+  { key: "wet_floor", label: "الأرضيات المبللة" },
+];
+
+function violationReportTypeLabel(violationType) {
+  const t = String(violationType || "").trim().toLowerCase();
+  const row = VIOLATION_REPORT_CATEGORY_ORDER.find((c) => c.key === t);
+  if (row) return row.label;
+  if (t === "no_uniform") return "الزي الموحّد";
+  return null;
+}
+
+function computeViolationsReportStats(alerts) {
+  const list = Array.isArray(alerts) ? alerts : [];
+  const typeCounts = Object.fromEntries(VIOLATION_REPORT_CATEGORY_ORDER.map((c) => [c.key, 0]));
+  typeCounts._other = 0;
+  const byRawType = new Map();
+  let openCount = 0;
+  let resolvedCount = 0;
+  for (const a of list) {
+    const raw = String(a.type || "").trim().toLowerCase();
+    if (raw) {
+      byRawType.set(raw, (byRawType.get(raw) || 0) + 1);
+    }
+    const known = VIOLATION_REPORT_CATEGORY_ORDER.some((c) => c.key === raw);
+    if (known) {
+      typeCounts[raw] += 1;
+    } else if (raw) {
+      typeCounts._other += 1;
+    }
+    const st = String(a.status || "").toLowerCase();
+    if (st === "resolved") resolvedCount += 1;
+    else openCount += 1;
+  }
+  let topRaw = "";
+  let topN = 0;
+  for (const [k, n] of byRawType.entries()) {
+    if (n > topN) {
+      topN = n;
+      topRaw = k;
+    }
+  }
+  let topLabel = "—";
+  if (topN > 0 && topRaw) {
+    topLabel =
+      violationReportTypeLabel(topRaw) ||
+      list.find((x) => String(x.type || "").trim().toLowerCase() === topRaw)?.label_ar ||
+      topRaw;
+  }
+  const sortedLatest = [...list].sort(
+    (x, y) => new Date(y.created_at || 0).getTime() - new Date(x.created_at || 0).getTime(),
+  );
+  return {
+    total: list.length,
+    typeCounts,
+    openCount,
+    resolvedCount,
+    topRepeated: { type: topRaw, count: topN, label: topLabel },
+    latest: sortedLatest.slice(0, 15),
+  };
+}
+
+function formatFileBytes(sizeBytes) {
+  const n = Number(sizeBytes);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  if (n < 1024) return `${n} B`;
+  const kb = n / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(2)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
+}
+
+function formatVideoDuration(seconds) {
+  const total = Number(seconds);
+  if (!Number.isFinite(total) || total <= 0) return "غير متاح";
+  const s = Math.floor(total % 60);
+  const m = Math.floor((total / 60) % 60);
+  const h = Math.floor(total / 3600);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function makeVideoFrameTimes(durationSec, sampleCount = 12) {
+  const d = Number(durationSec);
+  if (!Number.isFinite(d) || d <= 0) return [];
+  const minSamples = d < 20 ? 10 : 8;
+  const targetCount = Math.max(minSamples, Math.min(22, Math.floor(sampleCount)));
+  const epsilon = Math.max(0.06, Math.min(0.35, d / 12));
+  const start = Math.max(0, epsilon);
+  const end = Math.max(start, d - epsilon);
+  const anchors = [start, d * 0.25, d * 0.5, d * 0.75, end];
+  const times = [];
+  for (const t of anchors) {
+    if (Number.isFinite(t)) times.push(Math.max(0, Math.min(d, t)));
+  }
+  if (targetCount <= 1 || end <= start) {
+    const center = Math.max(0, Math.min(d, d / 2));
+    times.push(center);
+  } else {
+    for (let i = 0; i < targetCount; i += 1) {
+      const ratio = i / (targetCount - 1);
+      const t = start + (end - start) * ratio;
+      times.push(Math.max(0, Math.min(d, t)));
+    }
+  }
+  const uniqueSorted = Array.from(new Set(times.map((t) => Number(t.toFixed(2))))).sort((a, b) => a - b);
+  return uniqueSorted;
 }
 
 function inferBadgesFromApi(item) {
@@ -347,6 +628,7 @@ export default function Dashboard() {
   const supervisorReviewsRef = useRef(null);
   const supervisorReportsRef = useRef(null);
   const supervisorEmployeesRef = useRef(null);
+  const supervisorSettingsRef = useRef(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedPreviewUrl, setSelectedPreviewUrl] = useState("");
   const [captureModalOpen, setCaptureModalOpen] = useState(false);
@@ -411,15 +693,42 @@ export default function Dashboard() {
   const [staffProfileLoading, setStaffProfileLoading] = useState(false);
   const [cameraCards, setCameraCards] = useState([]);
   const [cameraCardsLoading, setCameraCardsLoading] = useState(false);
+  const [cameraCardsError, setCameraCardsError] = useState("");
   const [alertsList, setAlertsList] = useState([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsError, setAlertsError] = useState("");
   const [cameraTestFile, setCameraTestFile] = useState(null);
   const [cameraTestPreviewUrl, setCameraTestPreviewUrl] = useState("");
+  const [cameraAnalyzeMode, setCameraAnalyzeMode] = useState("image");
+  const [cameraVideoFile, setCameraVideoFile] = useState(null);
+  const [cameraVideoPreviewUrl, setCameraVideoPreviewUrl] = useState("");
+  const [cameraVideoDurationSec, setCameraVideoDurationSec] = useState(null);
+  const [cameraVideoError, setCameraVideoError] = useState("");
+  const [monitoringVideoAnalyzeLoading, setMonitoringVideoAnalyzeLoading] = useState(false);
+  const [monitoringVideoProgressText, setMonitoringVideoProgressText] = useState("");
+  const [monitoringVideoResults, setMonitoringVideoResults] = useState([]);
+  const [monitoringVideoFrameResults, setMonitoringVideoFrameResults] = useState([]);
+  const [monitoringVideoAnalyzedTimes, setMonitoringVideoAnalyzedTimes] = useState([]);
+  const [monitoringVideoRawViolationCount, setMonitoringVideoRawViolationCount] = useState(0);
+  const [monitoringVideoAlertsCreated, setMonitoringVideoAlertsCreated] = useState(0);
   const [newCameraForm, setNewCameraForm] = useState({ name: "", location: "", stream_url: "" });
   const [monitoringAnalysisResult, setMonitoringAnalysisResult] = useState(null);
   const [monitoringAnalyzeLoading, setMonitoringAnalyzeLoading] = useState(false);
   const [monitoringLastAnalyzedAt, setMonitoringLastAnalyzedAt] = useState(null);
   const [monitoringCameraSelectId, setMonitoringCameraSelectId] = useState("");
   const [monitoringResolveLoadingId, setMonitoringResolveLoadingId] = useState(null);
+  const [adminSettings, setAdminSettings] = useState(ADMIN_SETTINGS_DEFAULTS);
+  const [adminSettingsSaving, setAdminSettingsSaving] = useState(false);
+  const [alertsVisibleCount, setAlertsVisibleCount] = useState(ALERTS_PAGE_STEP);
+  const [reviewPage, setReviewPage] = useState(1);
+  const [employeePage, setEmployeePage] = useState(1);
+  const [violationsReportFrom, setViolationsReportFrom] = useState("");
+  const [violationsReportTo, setViolationsReportTo] = useState("");
+  const [violationsReportRows, setViolationsReportRows] = useState([]);
+  const [violationsReportLoading, setViolationsReportLoading] = useState(false);
+  const [violationsReportError, setViolationsReportError] = useState("");
+  const hasPdfExport = false;
+  const hasExcelExport = false;
   const { role, getAccessToken, logout, handleProtectedAuthFailure } = useDashboardAuth({ setToast });
 
   const { handleDetectDish } = useDetectDish({
@@ -478,6 +787,26 @@ export default function Dashboard() {
   }, [cameraTestFile]);
 
   useEffect(() => {
+    if (!cameraVideoFile) {
+      setCameraVideoPreviewUrl("");
+      setCameraVideoDurationSec(null);
+      return undefined;
+    }
+    const url = URL.createObjectURL(cameraVideoFile);
+    setCameraVideoPreviewUrl(url);
+    setCameraVideoDurationSec(null);
+    return () => URL.revokeObjectURL(url);
+  }, [cameraVideoFile]);
+
+  useEffect(() => {
+    return () => {
+      monitoringVideoFrameResults.forEach((item) => {
+        if (item?.frameUrl) URL.revokeObjectURL(item.frameUrl);
+      });
+    };
+  }, [monitoringVideoFrameResults]);
+
+  useEffect(() => {
     if (!selectedImage && dishFileInputRef.current) {
       dishFileInputRef.current.value = "";
     }
@@ -496,6 +825,17 @@ export default function Dashboard() {
     const t = setTimeout(() => clearToast(), 4200);
     return () => clearTimeout(t);
   }, [toast, clearToast]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ADMIN_SETTINGS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      setAdminSettings(normalizeAdminSettingsShape(parsed));
+    } catch (e) {
+      console.warn("[ska] failed to read admin settings from localStorage", e);
+    }
+  }, []);
 
   useEffect(() => {
     if (highlightRawId == null) return undefined;
@@ -517,27 +857,33 @@ export default function Dashboard() {
     const fromHash = staffSectionFromHash(window.location.hash);
     if (fromHash) setActiveStaffSection(fromHash);
     const nodes = [
-      staffDocSectionRef.current,
-      staffSearchSectionRef.current,
-      staffRecordsSectionRef.current,
+      document.getElementById(STAFF_SECTION_IDS.doc),
+      document.getElementById(STAFF_SECTION_IDS.search),
+      document.getElementById(STAFF_SECTION_IDS.records),
     ].filter(Boolean);
     if (nodes.length === 0) return undefined;
 
     const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting && e.target.id)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-        if (visible[0]?.target?.id) {
-          const id = visible[0].target.id;
-          setActiveStaffSection(id);
-          const wantedHash = `#${id}`;
+      () => {
+        let bestId = null;
+        let bestDist = Number.POSITIVE_INFINITY;
+        for (const el of nodes) {
+          const top = el.getBoundingClientRect().top;
+          const dist = Math.abs(top - 120);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestId = el.id;
+          }
+        }
+        if (bestId) {
+          setActiveStaffSection(bestId);
+          const wantedHash = `#${bestId}`;
           if (window.location.hash !== wantedHash) {
             window.history.replaceState(null, "", wantedHash);
           }
         }
       },
-      { root: null, rootMargin: "-28% 0px -52% 0px", threshold: [0, 0.08, 0.15, 0.25, 0.4] },
+      { root: null, rootMargin: "-20% 0px -60% 0px", threshold: [0, 0.1, 0.25, 0.5] },
     );
     nodes.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
@@ -561,6 +907,7 @@ export default function Dashboard() {
       supervisorReviewsRef.current,
       supervisorReportsRef.current,
       supervisorEmployeesRef.current,
+      supervisorSettingsRef.current,
     ].filter(Boolean);
     if (nodes.length === 0) return undefined;
     const observer = new IntersectionObserver(
@@ -736,32 +1083,222 @@ export default function Dashboard() {
         { href: "#analytics", label: "التحليلات", sectionId: SUPERVISOR_SECTION_IDS.analytics },
         { href: "#alerts", label: "التنبيهات", sectionId: SUPERVISOR_SECTION_IDS.alerts },
         { href: "#cameras", label: "الكاميرات", sectionId: SUPERVISOR_SECTION_IDS.cameras },
-        { href: "#dish-reviews", label: "مراجعة الأطباق", sectionId: SUPERVISOR_SECTION_IDS.reviews },
         { href: "#reports", label: "التقارير", sectionId: SUPERVISOR_SECTION_IDS.reports },
+        { href: "#dish-reviews", label: "مراجعة الأطباق", sectionId: SUPERVISOR_SECTION_IDS.reviews },
         { href: "#employees", label: "الموظفين", sectionId: SUPERVISOR_SECTION_IDS.employees },
+        { href: "#settings", label: "الإعدادات", sectionId: SUPERVISOR_SECTION_IDS.settings },
       ];
     }
     return [
       { href: "#analytics", label: "التحليلات", sectionId: SUPERVISOR_SECTION_IDS.analytics },
       { href: "#alerts", label: "التنبيهات", sectionId: SUPERVISOR_SECTION_IDS.alerts },
       { href: "#cameras", label: "الكاميرات", sectionId: SUPERVISOR_SECTION_IDS.cameras },
-      { href: "#dish-reviews", label: "مراجعة الأطباق", sectionId: SUPERVISOR_SECTION_IDS.reviews },
       { href: "#reports", label: "التقارير", sectionId: SUPERVISOR_SECTION_IDS.reports },
+      { href: "#dish-reviews", label: "مراجعة الأطباق", sectionId: SUPERVISOR_SECTION_IDS.reviews },
       { href: "#employees", label: "الموظفين", sectionId: SUPERVISOR_SECTION_IDS.employees },
+      { href: "#settings", label: "الإعدادات", sectionId: SUPERVISOR_SECTION_IDS.settings },
     ];
   }, [role]);
+
+  const saveAdminSettings = useCallback(() => {
+    const normalized = normalizeAdminSettingsShape(adminSettings);
+    setAdminSettingsSaving(true);
+    try {
+      localStorage.setItem(ADMIN_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+      setAdminSettings(normalized);
+      setToast({ type: "success", text: "تم حفظ إعدادات النظام محلياً." });
+    } catch {
+      setToast({ type: "error", text: "تعذر حفظ الإعدادات محلياً." });
+    } finally {
+      setAdminSettingsSaving(false);
+    }
+  }, [adminSettings, setToast]);
+
+  const resetAdminSettings = useCallback(() => {
+    setAdminSettings(ADMIN_SETTINGS_DEFAULTS);
+    try {
+      localStorage.setItem(ADMIN_SETTINGS_STORAGE_KEY, JSON.stringify(ADMIN_SETTINGS_DEFAULTS));
+      setToast({ type: "success", text: "تمت إعادة الإعدادات للوضع الافتراضي." });
+    } catch {
+      setToast({ type: "error", text: "تعذر إعادة ضبط الإعدادات محلياً." });
+    }
+  }, [setToast]);
+
+  const reviewFiltersAreActive = useMemo(
+    () =>
+      reviewFilters.employee.trim() !== "" ||
+      reviewFilters.dishType.trim() !== "" ||
+      reviewFilters.dateFrom !== "" ||
+      reviewFilters.dateTo !== "" ||
+      reviewFilters.confidenceMin !== "" ||
+      reviewFilters.confidenceMax !== "" ||
+      reviewFilters.status !== "needs_review",
+    [reviewFilters],
+  );
+
+  const employeeFiltersAreActive = useMemo(
+    () =>
+      employeeFilters.search.trim() !== "" ||
+      Boolean(employeeFilters.role) ||
+      employeeFilters.activeToday ||
+      employeeFilters.hasPendingReviews,
+    [employeeFilters],
+  );
+
+  const reviewTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(reviewRecords.length / REVIEW_PAGE_SIZE)),
+    [reviewRecords.length],
+  );
+
+  const pagedReviewRecords = useMemo(() => {
+    const start = (reviewPage - 1) * REVIEW_PAGE_SIZE;
+    return reviewRecords.slice(start, start + REVIEW_PAGE_SIZE);
+  }, [reviewRecords, reviewPage]);
+
+  const employeeTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(supervisorEmployees.length / EMPLOYEE_PAGE_SIZE)),
+    [supervisorEmployees.length],
+  );
+
+  const pagedSupervisorEmployees = useMemo(() => {
+    const start = (employeePage - 1) * EMPLOYEE_PAGE_SIZE;
+    return supervisorEmployees.slice(start, start + EMPLOYEE_PAGE_SIZE);
+  }, [supervisorEmployees, employeePage]);
+
+  useEffect(() => {
+    const maxP = Math.max(1, Math.ceil(reviewRecords.length / REVIEW_PAGE_SIZE));
+    setReviewPage((p) => Math.min(Math.max(1, p), maxP));
+  }, [reviewRecords.length]);
+
+  useEffect(() => {
+    const maxP = Math.max(1, Math.ceil(supervisorEmployees.length / EMPLOYEE_PAGE_SIZE));
+    setEmployeePage((p) => Math.min(Math.max(1, p), maxP));
+  }, [supervisorEmployees.length]);
+
+  const exportSupervisorReportCsv = useCallback(() => {
+    if (!supervisorSummary) {
+      setToast({ type: "error", text: "لا توجد بيانات ملخص للتصدير." });
+      return;
+    }
+    const s = supervisorSummary;
+    const val = (v) => (v === undefined || v === null ? "" : v);
+    const filename = `ska-supervisor-summary-${new Date().toISOString().slice(0, 10)}.csv`;
+    downloadUtf8Csv(
+      filename,
+      ["المؤشر", "القيمة"],
+      [
+        ["إجمالي الأطباق", val(s.total_dishes)],
+        ["الأطباق هذا الأسبوع", val(s.dishes_week)],
+        ["إجمالي الكمية", val(s.total_quantity)],
+        ["معلّق للمراجعة", val(s.pending_reviews)],
+        ["المعتمد اليوم", val(s.approved_today)],
+        ["المرفوض اليوم", val(s.rejected_today)],
+        ["إجمالي الموظفين", val(s.total_employees)],
+        ["نشط اليوم", val(s.active_employees_today)],
+        ["أكثر موظف مراجعات (الاسم)", val(s.top_employee_review_name)],
+        ["عدد مراجعاته", val(s.top_employee_review_count)],
+        ["أكثر طبق مسجّل", val(s.most_common_dish)],
+        ["أكثر طبق يحتاج مراجعة", val(s.most_reviewed_dish)],
+        ["متوسط الثقة", val(s.average_confidence)],
+        ["مؤشر الجودة", val(s.quality_score ?? s.compliance_rate)],
+        ["التنبيهات", val(s.alerts_count)],
+        ["المخالفات", val(s.violations_count)],
+        ["الأطباق اليوم", val(s.dishes_today ?? s.dishes_count)],
+        ["اسم الفرع", val(s.branch_name)],
+      ],
+    );
+    setToast({ type: "success", text: "تم تنزيل تقرير CSV للملخص." });
+  }, [supervisorSummary, setToast]);
+
+  const exportReviewRecordsCsv = useCallback(() => {
+    if (!reviewRecords.length) {
+      setToast({ type: "error", text: "لا توجد سجلات مراجعة للتصدير." });
+      return;
+    }
+    const filename = `ska-dish-reviews-${new Date().toISOString().slice(0, 10)}.csv`;
+    downloadUtf8Csv(
+      filename,
+      [
+        "id",
+        "status",
+        "predicted_label",
+        "confirmed_label",
+        "quantity",
+        "employee_name",
+        "employee_email",
+        "recorded_at",
+        "reviewed_at",
+        "ai_confidence",
+      ],
+      reviewRecords.map((r) => [
+        r.id,
+        r.status,
+        r.predicted_label,
+        r.confirmed_label,
+        r.quantity,
+        r.employee_name,
+        r.employee_email,
+        r.recorded_at,
+        r.reviewed_at,
+        r.ai_confidence,
+      ]),
+    );
+    setToast({ type: "success", text: "تم تنزيل سجلات المراجعة." });
+  }, [reviewRecords, setToast]);
+
+  const violationsReportStats = useMemo(
+    () => computeViolationsReportStats(violationsReportRows),
+    [violationsReportRows],
+  );
+
+  const exportViolationsReportLatestCsv = useCallback(() => {
+    const latest = violationsReportStats.latest;
+    if (!latest.length) {
+      setToast({ type: "error", text: "لا توجد صفوف في جدول أحدث المخالفات للتصدير." });
+      return;
+    }
+    downloadUtf8Csv(
+      `ska-violations-latest-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["النوع", "التفاصيل", "الحالة", "الفرع", "الكاميرا", "الوقت"],
+      latest.map((row) => [
+        violationReportTypeLabel(row.type) || row.label_ar || row.type || "—",
+        String(row.details || "—")
+          .replace(/\s+/g, " ")
+          .trim(),
+        monitoringAlertStatusAr(row.status),
+        row.branch || "—",
+        row.camera_name || "—",
+        formatSaudiDateTime(row.created_at),
+      ]),
+    );
+    setToast({ type: "success", text: "تم تنزيل CSV لأحدث المخالفات." });
+  }, [violationsReportStats.latest, setToast]);
+
+  const printViolationsReportPdf = useCallback(() => {
+    if (!violationsReportStats.total) {
+      setToast({ type: "error", text: "لا يوجد تقرير للطباعة أو التصدير." });
+      return;
+    }
+    const el = document.getElementById("ska-violations-report-print");
+    if (!el || !el.querySelector("tbody tr")) {
+      setToast({ type: "error", text: "تعذر تجهيز صفحة التقرير." });
+      return;
+    }
+    setTimeout(() => window.print(), 100);
+  }, [violationsReportStats.total, setToast]);
 
   const supervisorCards = useMemo(
     () => {
       const loading = supervisorSummaryLoading;
-      const numOrZero = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-      const qualityScore = numOrZero(supervisorSummary?.quality_score ?? supervisorSummary?.compliance_rate);
-      const alertsCount = numOrZero(supervisorSummary?.alerts_count);
-      const violationsCount = numOrZero(supervisorSummary?.violations_count);
-      const dishesCount = numOrZero(supervisorSummary?.dishes_count ?? supervisorSummary?.dishes_today);
-      const valueText = (n) => (loading ? "..." : String(n));
+      const numOrNull = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+      const qualityScore = numOrNull(supervisorSummary?.quality_score ?? supervisorSummary?.compliance_rate);
+      const alertsCount = numOrNull(supervisorSummary?.alerts_count);
+      const violationsCount = numOrNull(supervisorSummary?.violations_count);
+      const dishesCount = numOrNull(supervisorSummary?.dishes_count ?? supervisorSummary?.dishes_today);
+      const valueText = (n) => (loading ? "..." : n == null ? "غير متوفر" : String(n));
       const valueClass = (n, isAlert = false) => {
         if (loading) return "text-white";
+        if (n == null) return "text-slate-500";
         if (isAlert && n >= 10) return "text-red-300";
         if (n === 0) return "text-slate-400";
         return "text-white";
@@ -802,6 +1339,20 @@ export default function Dashboard() {
 
   const hasMonitoringData =
     Number(supervisorSummary?.dishes_today || 0) > 0 || Number(supervisorSummary?.violations_count || 0) > 0;
+  const supervisorHeaderStats = useMemo(
+    () => [
+      { label: "الدور", value: role === "admin" ? "مدير النظام" : role === "supervisor" ? "مشرف" : "—" },
+      { label: "القسم الحالي", value: navLinks.find((n) => n.sectionId === activeSection)?.label || "التحليلات" },
+      { label: "التنبيهات", value: alertsLoading ? "..." : String(alertsList.length) },
+      { label: "الكاميرات", value: cameraCardsLoading ? "..." : String(cameraCards.length) },
+      { label: "طلبات المراجعة", value: reviewLoading ? "..." : String(reviewRecords.length) },
+      {
+        label: "آخر تحليل",
+        value: monitoringLastAnalyzedAt ? formatSaudiDateTime(monitoringLastAnalyzedAt) : "غير متوفر",
+      },
+    ],
+    [activeSection, alertsList.length, alertsLoading, cameraCards.length, cameraCardsLoading, monitoringLastAnalyzedAt, navLinks, reviewLoading, reviewRecords.length, role]
+  );
 
   const loadSupervisorSummary = useCallback(async () => {
     if (!(role === "supervisor" || role === "admin")) return;
@@ -901,6 +1452,7 @@ export default function Dashboard() {
     const token = getAccessToken();
     if (!token) return;
     setCameraCardsLoading(true);
+    setCameraCardsError("");
     try {
       const res = await fetch(SUPERVISOR_CAMERAS_URL, { headers: { Authorization: `Bearer ${token}` } });
       const body = await res.json().catch(() => []);
@@ -909,10 +1461,14 @@ export default function Dashboard() {
         return;
       }
       if (!res.ok || !Array.isArray(body)) {
+        setCameraCardsError("تعذر تحميل بيانات الكاميرات.");
         setCameraCards([]);
         return;
       }
       setCameraCards(body);
+    } catch {
+      setCameraCards([]);
+      setCameraCardsError("تعذر تحميل بيانات الكاميرات.");
     } finally {
       setCameraCardsLoading(false);
     }
@@ -922,6 +1478,8 @@ export default function Dashboard() {
     if (!(role === "supervisor" || role === "admin")) return;
     const token = getAccessToken();
     if (!token) return;
+    setAlertsLoading(true);
+    setAlertsError("");
     try {
       const res = await fetch(SUPERVISOR_ALERTS_URL, { headers: { Authorization: `Bearer ${token}` } });
       const body = await res.json().catch(() => []);
@@ -930,14 +1488,61 @@ export default function Dashboard() {
         return;
       }
       if (!res.ok || !Array.isArray(body)) {
+        setAlertsError("تعذر تحميل التنبيهات.");
         setAlertsList([]);
         return;
       }
       setAlertsList(body);
     } catch {
+      setAlertsError("تعذر تحميل التنبيهات.");
       setAlertsList([]);
+    } finally {
+      setAlertsLoading(false);
     }
   }, [getAccessToken, handleProtectedAuthFailure, role]);
+
+  const fetchViolationsReport = useCallback(
+    async (fromStr, toStr) => {
+      if (role !== "admin") return;
+      const token = getAccessToken();
+      if (!token) return;
+      const from = String(fromStr || "").trim();
+      const to = String(toStr || "").trim();
+      if (from && to && from > to) {
+        setViolationsReportError("تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية.");
+        setViolationsReportRows([]);
+        return;
+      }
+      setViolationsReportLoading(true);
+      setViolationsReportError("");
+      try {
+        const qp = new URLSearchParams();
+        qp.set("limit", "500");
+        if (from && isValidYmdDate(from)) qp.set("date_from", from);
+        if (to && isValidYmdDate(to)) qp.set("date_to", to);
+        const res = await fetch(`${SUPERVISOR_ALERTS_URL}?${qp}`, { headers: { Authorization: `Bearer ${token}` } });
+        const body = await res.json().catch(() => []);
+        if (handleProtectedAuthFailure(res.status, body?.detail)) {
+          setViolationsReportRows([]);
+          return;
+        }
+        if (!res.ok || !Array.isArray(body)) {
+          setViolationsReportError(
+            protectedApiErrorText(res.status, body?.detail) || "تعذر تحميل بيانات المخالفات.",
+          );
+          setViolationsReportRows([]);
+          return;
+        }
+        setViolationsReportRows(body);
+      } catch {
+        setViolationsReportError("تعذر تحميل بيانات المخالفات.");
+        setViolationsReportRows([]);
+      } finally {
+        setViolationsReportLoading(false);
+      }
+    },
+    [getAccessToken, handleProtectedAuthFailure, role],
+  );
 
   useEffect(() => {
     if (location.pathname !== "/monitoring") return;
@@ -968,6 +1573,36 @@ export default function Dashboard() {
     void loadSupervisorCameras();
     void loadSupervisorAlerts();
   }, [role, loadSupervisorCameras, loadSupervisorAlerts]);
+
+  useEffect(() => {
+    setAlertsVisibleCount(ALERTS_PAGE_STEP);
+  }, [alertsList.length]);
+
+  useEffect(() => {
+    setReviewPage(1);
+  }, [
+    reviewFilters.employee,
+    reviewFilters.dishType,
+    reviewFilters.dateFrom,
+    reviewFilters.dateTo,
+    reviewFilters.confidenceMin,
+    reviewFilters.confidenceMax,
+    reviewFilters.status,
+  ]);
+
+  useEffect(() => {
+    setEmployeePage(1);
+  }, [employeeFilters.search, employeeFilters.role, employeeFilters.activeToday, employeeFilters.hasPendingReviews]);
+
+  useEffect(() => {
+    if (role !== "admin") {
+      setViolationsReportRows([]);
+      setViolationsReportError("");
+      return undefined;
+    }
+    void fetchViolationsReport("", "");
+    return undefined;
+  }, [role, fetchViolationsReport]);
 
   async function approveReviewRecord(record) {
     const token = getAccessToken();
@@ -1064,6 +1699,30 @@ export default function Dashboard() {
     }
   }
 
+  // Shared fetch helper used by both image upload and video frame analysis.
+  // Builds FormData with the exact same keys the backend expects, POSTs to
+  // MONITORING_ANALYZE_URL, and returns { ok, status, body } — no side effects.
+  async function callAnalyzeFrameEndpoint(imageFile, token) {
+    const fd = new FormData();
+    fd.append("image", imageFile);
+    if (monitoringCameraSelectId) {
+      const idNum = Number(monitoringCameraSelectId);
+      if (Number.isFinite(idNum)) fd.append("camera_id", String(idNum));
+    }
+    const sel = cameraCards.find((c) => String(c.id) === String(monitoringCameraSelectId));
+    const name = (newCameraForm.name || "").trim() || (sel?.name || "").trim();
+    const loc = (newCameraForm.location || "").trim() || (sel?.location || "").trim();
+    if (name) fd.append("camera_name", name);
+    if (loc) fd.append("location", loc);
+    const res = await fetch(MONITORING_ANALYZE_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd,
+    });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, body };
+  }
+
   async function analyzeMonitoringFrameUpload() {
     if (!(role === "supervisor" || role === "admin")) return;
     const token = getAccessToken();
@@ -1073,41 +1732,18 @@ export default function Dashboard() {
     }
     setMonitoringAnalyzeLoading(true);
     try {
-      const fd = new FormData();
-      fd.append("image", cameraTestFile);
-      if (monitoringCameraSelectId) {
-        const idNum = Number(monitoringCameraSelectId);
-        if (Number.isFinite(idNum)) fd.append("camera_id", String(idNum));
-      }
-      const sel = cameraCards.find((c) => String(c.id) === String(monitoringCameraSelectId));
-      const name = (newCameraForm.name || "").trim() || (sel?.name || "").trim();
-      const loc = (newCameraForm.location || "").trim() || (sel?.location || "").trim();
-      if (name) fd.append("camera_name", name);
-      if (loc) fd.append("location", loc);
-
-      const res = await fetch(MONITORING_ANALYZE_URL, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-      const body = await res.json().catch(() => ({}));
-      if (handleProtectedAuthFailure(res.status, body?.detail)) return;
-      if (res.status === 503) {
-        setToast({
-          type: "error",
-          text:
-            typeof body?.detail === "string" && body.detail.trim()
-              ? body.detail
-              : "تعذر تحليل الصورة. تحقق من إعدادات الذكاء الاصطناعي أو فعّل وضع التجريبي.",
-        });
-        return;
-      }
-      if (res.status === 400) {
-        setToast({ type: "error", text: "الصورة غير صالحة." });
-        return;
-      }
-      if (!res.ok) {
-        setToast({ type: "error", text: "فشل تحليل الصورة. تحقق من إعدادات الذكاء الاصطناعي." });
+      const { ok, status, body } = await callAnalyzeFrameEndpoint(cameraTestFile, token);
+      if (handleProtectedAuthFailure(status, body?.detail)) return;
+      if (!ok) {
+        console.error("[monitoring] analyze-frame failed", { status, detail: body?.detail, url: MONITORING_ANALYZE_URL });
+        const errDetail = typeof body?.detail === "string" && body.detail.trim() ? body.detail : null;
+        if (status === 503) {
+          setToast({ type: "error", text: errDetail || "تعذر تحليل الصورة. تحقق من إعدادات الذكاء الاصطناعي أو فعّل وضع التجريبي." });
+        } else if (status === 400) {
+          setToast({ type: "error", text: errDetail || "الصورة غير صالحة." });
+        } else {
+          setToast({ type: "error", text: errDetail || "فشل تحليل الصورة. تحقق من إعدادات الذكاء الاصطناعي." });
+        }
         return;
       }
       setMonitoringAnalysisResult(body);
@@ -1118,10 +1754,182 @@ export default function Dashboard() {
       await loadSupervisorAlerts();
       await loadSupervisorCameras();
       await loadSupervisorSummary();
-    } catch {
+    } catch (err) {
+      console.error("[monitoring] analyzeMonitoringFrameUpload exception:", err);
       setToast({ type: "error", text: "فشل تحليل الصورة. تحقق من إعدادات الذكاء الاصطناعي." });
     } finally {
       setMonitoringAnalyzeLoading(false);
+    }
+  }
+
+  function onSelectMonitoringVideoFile(file) {
+    if (!file) {
+      setCameraVideoFile(null);
+      setCameraVideoError("");
+      setMonitoringVideoResults([]);
+      setMonitoringVideoFrameResults([]);
+      setMonitoringVideoAnalyzedTimes([]);
+      setMonitoringVideoRawViolationCount(0);
+      setMonitoringVideoAlertsCreated(0);
+      return;
+    }
+    if (!String(file.type || "").startsWith("video/")) {
+      setCameraVideoFile(null);
+      setCameraVideoError("الملف المحدد ليس فيديو صالحاً. الرجاء اختيار ملف mp4 أو mov أو webm.");
+      return;
+    }
+    setCameraVideoError("");
+    setCameraVideoFile(file);
+    setMonitoringVideoResults([]);
+    setMonitoringVideoFrameResults([]);
+    setMonitoringVideoAnalyzedTimes([]);
+    setMonitoringVideoRawViolationCount(0);
+    setMonitoringVideoAlertsCreated(0);
+  }
+
+  function extractFrameBlobAt(videoEl, atSecond) {
+    return new Promise((resolve, reject) => {
+      const onSeeked = () => {
+        videoEl.removeEventListener("seeked", onSeeked);
+        const canvas = document.createElement("canvas");
+        canvas.width = videoEl.videoWidth || 1280;
+        canvas.height = videoEl.videoHeight || 720;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("ctx_failed"));
+          return;
+        }
+        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            reject(new Error("blob_failed"));
+            return;
+          }
+          resolve(blob);
+        }, "image/jpeg", 0.9);
+      };
+      videoEl.addEventListener("seeked", onSeeked, { once: true });
+      videoEl.currentTime = Math.max(0, atSecond);
+    });
+  }
+
+  async function analyzeMonitoringVideoUpload() {
+    if (!(role === "supervisor" || role === "admin")) return;
+    const token = getAccessToken();
+    if (!token || !cameraVideoFile) {
+      setToast({ type: "error", text: "يرجى اختيار فيديو للتحليل." });
+      return;
+    }
+    setMonitoringVideoAnalyzeLoading(true);
+    setMonitoringVideoProgressText("جاري تجهيز الفيديو...");
+    setMonitoringVideoResults([]);
+    setMonitoringVideoFrameResults([]);
+    setMonitoringVideoAnalyzedTimes([]);
+    setMonitoringVideoRawViolationCount(0);
+    setMonitoringVideoAlertsCreated(0);
+    try {
+      const url = URL.createObjectURL(cameraVideoFile);
+      const video = document.createElement("video");
+      video.preload = "metadata";
+      video.muted = true;
+      video.src = url;
+      await new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error("video_metadata_failed"));
+      });
+      const duration = Number(video.duration);
+      const times = makeVideoFrameTimes(duration, 14);
+      if (!times.length) {
+        setToast({ type: "error", text: "تعذر قراءة مدة الفيديو للتحليل." });
+        URL.revokeObjectURL(url);
+        return;
+      }
+      const frameRows = [];
+      const bestByType = new Map();
+      let rawViolationCount = 0;
+      let alertsCreated = 0;
+      let apiErrorShown = false;
+      for (let i = 0; i < times.length; i += 1) {
+        const t = times[i];
+        setMonitoringVideoProgressText(`جاري تحليل الفيديو... (${i + 1}/${times.length})`);
+        const frameBlob = await extractFrameBlobAt(video, t);
+        const frameUrl = URL.createObjectURL(frameBlob);
+        const frameFile = new File([frameBlob], `video-frame-${Math.round(t * 1000)}.jpg`, { type: "image/jpeg" });
+        // Use the same endpoint/FormData/auth as the working single-image upload.
+        const { ok, status, body } = await callAnalyzeFrameEndpoint(frameFile, token);
+        if (handleProtectedAuthFailure(status, body?.detail)) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        if (!ok) {
+          console.error("[monitoring] video frame failed", { frame: i, atSecond: t, status, detail: body?.detail });
+          if (!apiErrorShown) {
+            apiErrorShown = true;
+            const errDetail = typeof body?.detail === "string" && body.detail.trim() ? body.detail : null;
+            setToast({ type: "error", text: errDetail || "تعذر تحليل بعض اللقطات. تحقق من إعدادات الذكاء الاصطناعي." });
+          }
+          frameRows.push({
+            id: `frame-${i}`,
+            atSecond: t,
+            frameUrl,
+            violations: [],
+            errorText: typeof body?.detail === "string" && body.detail.trim() ? body.detail : "تعذر تحليل هذه اللقطة",
+          });
+          continue;
+        }
+        alertsCreated += Number(body?.alerts_created || 0);
+        const violations = Array.isArray(body?.violations) ? body.violations : [];
+        rawViolationCount += violations.length;
+        const normalized = violations.map((v, idx) => ({
+          id: `${i}-${idx}-${v?.type || "x"}`,
+          atSecond: t,
+          type: v?.label_ar || v?.type || "غير محدد",
+          typeKey: String(v?.type || v?.label_ar || `unknown-${idx}`).trim().toLowerCase(),
+          confidence: Number(v?.confidence || 0),
+          status: v?.status || "open",
+          reason: v?.reason_ar || "",
+          frameId: `frame-${i}`,
+        }));
+        frameRows.push({
+          id: `frame-${i}`,
+          atSecond: t,
+          frameUrl,
+          violations: normalized,
+          errorText: "",
+        });
+        normalized.forEach((v) => {
+          const prev = bestByType.get(v.typeKey);
+          if (!prev || Number(v.confidence || 0) > Number(prev.confidence || 0)) {
+            bestByType.set(v.typeKey, v);
+          }
+        });
+      }
+      URL.revokeObjectURL(url);
+      const aggregated = Array.from(bestByType.values()).sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0));
+      setMonitoringVideoFrameResults(frameRows);
+      setMonitoringVideoAnalyzedTimes(times);
+      setMonitoringVideoRawViolationCount(rawViolationCount);
+      setMonitoringVideoResults(aggregated);
+      setMonitoringVideoAlertsCreated(alertsCreated);
+      setMonitoringLastAnalyzedAt(new Date().toISOString());
+      if (!apiErrorShown) {
+        if (alertsCreated > 0) {
+          setToast({ type: "success", text: `تم تسجيل ${alertsCreated} مخالفة من تحليل الفيديو.` });
+        } else if (aggregated.length > 0) {
+          setToast({ type: "success", text: "تم تحليل الفيديو وعرض المخالفات المكتشفة." });
+        } else {
+          setToast({ type: "success", text: "تم تحليل اللقطات ولم يتم اكتشاف مخالفات." });
+        }
+      }
+      await loadSupervisorAlerts();
+      await loadSupervisorCameras();
+      await loadSupervisorSummary();
+    } catch (err) {
+      console.error("[monitoring] analyzeMonitoringVideoUpload exception:", err);
+      setToast({ type: "error", text: "تعذر تحليل الفيديو حالياً." });
+    } finally {
+      setMonitoringVideoAnalyzeLoading(false);
+      setMonitoringVideoProgressText("");
     }
   }
 
@@ -1376,8 +2184,56 @@ export default function Dashboard() {
     await confirmDeleteDishRecord({ recordOverride, deleteTarget });
   }
 
+  const videoAllFramesFailed =
+    monitoringVideoFrameResults.length > 0 &&
+    monitoringVideoFrameResults.every((f) => Boolean(f.errorText));
+
   return (
     <div className="min-h-screen bg-surface text-slate-100" dir="rtl">
+      {role === "admin" ? (
+        <style>
+          {`
+@media print {
+  html, body {
+    background: #ffffff !important;
+  }
+  .ska-dashboard-no-print {
+    display: none !important;
+  }
+  #ska-violations-report-print {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: auto !important;
+    box-sizing: border-box !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    direction: rtl !important;
+    padding: 10mm !important;
+    overflow: visible !important;
+    z-index: auto !important;
+    font-family: system-ui, "Segoe UI", Tahoma, Arial, sans-serif !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #ska-violations-report-print * {
+    color: #000000 !important;
+  }
+  #ska-violations-report-print table th {
+    background: #f1f5f9 !important;
+  }
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+}
+`}
+        </style>
+      ) : null}
+      <div className="ska-dashboard-no-print">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_70%_40%_at_50%_-10%,rgba(37,99,235,0.12),transparent)]" />
 
       <DashboardNav
@@ -1385,11 +2241,11 @@ export default function Dashboard() {
         navLinks={navLinks}
         activeStaffSection={activeStaffSection}
         activeSection={activeSection}
+        currentHash={location.hash || ""}
         mobileNavOpen={mobileNavOpen}
         setMobileNavOpen={setMobileNavOpen}
         logout={logout}
         dashboardTitle={dashboardTitle}
-        staffMe={staffMe}
       />
 
       <main id="home" className="relative z-10 mx-auto max-w-7xl px-3 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
@@ -1406,14 +2262,20 @@ export default function Dashboard() {
                 <p className="mt-2 max-w-2xl text-sm text-slate-400">
                   متابعة الجودة، تسجيل المخالفات، وعرض التنبيهات في منصة واحدة
                 </p>
-                {role === "supervisor" ? (
-                  <p className="mt-2 text-sm text-slate-300">الفرع: {supervisorSummary?.branch_name || "فرع تجريبي"}</p>
+                {(role === "supervisor" || role === "admin") && !supervisorSummaryLoading ? (
+                  <p className="mt-2 text-sm text-slate-300">
+                    {role === "admin" ? (
+                      "النطاق: جميع الفروع"
+                    ) : (
+                      <>الفرع: {supervisorSummary?.branch_name || "—"}</>
+                    )}
+                  </p>
                 ) : null}
               </div>
-              {!hasMonitoringData ? (
-                <span className="inline-flex w-fit items-center gap-2 rounded-full border border-brand-sky/30 bg-brand-sky/10 px-3 py-1 text-xs font-medium text-brand-sky">
-                  <span className="h-2 w-2 rounded-full bg-brand-sky" />
-                  بيانات تجريبية
+              {!supervisorSummaryLoading && supervisorSummary && !hasMonitoringData ? (
+                <span className="inline-flex w-fit max-w-[min(100%,20rem)] items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-3 py-1 text-xs font-medium text-slate-400">
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-slate-500" />
+                  لا يوجد نشاط مسجّل بعد في مؤشرات المراقبة (صفر أطباق اليوم ومخالفات).
                 </span>
               ) : null}
             </div>
@@ -1551,9 +2413,20 @@ export default function Dashboard() {
           </section>
         ) : (
           <>
-            <div className="sticky top-16 z-30 mb-4 rounded-xl border border-brand-sky/25 bg-[#0F172A]/80 px-3 py-2 text-xs text-sky-100 backdrop-blur">
-              القسم الحالي: {navLinks.find((n) => n.sectionId === activeSection)?.label || "التحليلات"}
-            </div>
+            <section className={`${glassCard} mb-6 p-4 sm:mb-8 sm:p-6`}>
+              <div className="mb-4 border-b border-white/10 pb-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-brand-sky">لوحة التحكم</p>
+                <h3 className="mt-1 text-lg font-bold text-white">ملخص الحالة الحالية</h3>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {supervisorHeaderStats.map((item) => (
+                  <article key={item.label} className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-2.5">
+                    <p className="text-[11px] text-slate-500">{item.label}</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-100">{item.value}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
 
             <section id="analytics" ref={supervisorAnalyticsRef} className="mb-8 scroll-mt-28">
               <div className="mb-3">
@@ -1577,18 +2450,36 @@ export default function Dashboard() {
                 </article>
               ))}
               </div>
+              <div className="mt-6 lg:mt-8">
+                <SupervisorAnalyticsBars loading={supervisorSummaryLoading} supervisorSummary={supervisorSummary} />
+              </div>
             </section>
 
             <section id="alerts" ref={supervisorAlertsRef} className={`${glassCard} mb-8 p-5`}>
-              <div className="mb-4 border-b border-white/10 pb-3">
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
                 <h3 className="flex items-center gap-2 text-lg font-bold text-white">
                   <IconBell className="h-5 w-5 text-accent-amber" />
                   آخر التنبيهات
                 </h3>
+                {!alertsLoading && alertsList.length > 0 ? (
+                  <p className="text-xs text-slate-500">
+                    عرض {Math.min(alertsVisibleCount, alertsList.length)} من {alertsList.length}
+                  </p>
+                ) : null}
               </div>
-              {alertsList.length > 0 ? (
+              {alertsLoading ? (
+                <div className="space-y-3" aria-busy="true">
+                  {[1, 2, 3, 4].map((i) => (
+                    <SkeletonPulse key={i} className="h-[4.5rem] w-full" />
+                  ))}
+                </div>
+              ) : alertsError ? (
+                <div className="rounded-xl border border-accent-red/35 bg-accent-red/10 px-3 py-6 text-center text-sm text-red-200">
+                  {alertsError}
+                </div>
+              ) : alertsList.length > 0 ? (
                 <ul className="flex flex-col gap-3">
-                  {alertsList.slice(0, 8).map((a) => (
+                  {alertsList.slice(0, alertsVisibleCount).map((a) => (
                     <li key={a.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-2.5 text-start text-sm">
                       <p className="font-medium text-slate-200">{a.label_ar || a.details || a.type}</p>
                       <p className="mt-0.5 text-xs text-slate-400">
@@ -1616,14 +2507,24 @@ export default function Dashboard() {
                   لا توجد تنبيهات مسجلة
                 </div>
               )}
+              {!alertsLoading && !alertsError && alertsList.length > alertsVisibleCount ? (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setAlertsVisibleCount((c) => c + ALERTS_PAGE_STEP)}
+                    className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 hover:text-white"
+                  >
+                    عرض المزيد ({alertsList.length - alertsVisibleCount} متبقية)
+                  </button>
+                </div>
+              ) : null}
             </section>
 
             <section id="cameras" ref={supervisorCamerasRef} className={`${glassCard} mb-8 p-5`}>
               <div className="mb-4 border-b border-white/10 pb-3">
-                <h3 className="text-lg font-bold text-white">الكاميرات</h3>
+                <h3 className="text-lg font-bold text-white">إدارة الكاميرات والفحص</h3>
                 <p className="mt-1 text-xs text-slate-400">
-                  تحليل صور السلامة للمشرفين فقط.{" "}
-                  {/* TODO: الوضع المستمر لاحقاً — التقاط إطار كل 2–3 ثوانٍ وتحليله تلقائياً (24/7). */}
+                  تسجيل الكاميرات ومراقبة الحالة. أدوات التحليل أدناه للمشرفين المصرّح لهم.
                 </p>
               </div>
               <div className="flex flex-col gap-6">
@@ -1661,7 +2562,40 @@ export default function Dashboard() {
                 </div>
 
                 <div className="rounded-xl border border-white/10 bg-[#060d1f]/50 p-4">
-                  <p className="mb-2 text-sm font-semibold text-white">مراقبة بالذكاء الاصطناعي (صورة)</p>
+                  <p className="mb-2 text-sm font-semibold text-white">مراقبة بالذكاء الاصطناعي</p>
+                  <div className="mb-3 rounded-xl border border-sky-500/25 bg-sky-500/5 px-3 py-2 text-[11px] leading-relaxed text-slate-300">
+                    التحليل يتم على الخادم عبر Gemini. إذا ظهرت رسالة فشل، راجع ملف{" "}
+                    <span className="font-mono text-slate-200" dir="ltr">backend/.env</span>:{" "}
+                    <span className="font-mono text-slate-200" dir="ltr">GEMINI_API_KEY</span> و
+                    <span className="font-mono text-slate-200" dir="ltr"> GEMINI_VISION_MODEL</span>
+                    ، أو فعّل للتجربة{" "}
+                    <span className="font-mono text-slate-200" dir="ltr">MONITORING_AI_DEMO_MODE=true</span>.
+                    حقل «الذكاء الاصطناعي» في بطاقة الكاميرة يخص التسجيل فقط ولا يوقف رفع الصورة/الفيديو للتحليل.
+                  </div>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCameraAnalyzeMode("image")}
+                      className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                        cameraAnalyzeMode === "image"
+                          ? "border-brand-sky/45 bg-brand/20 text-sky-100"
+                          : "border-white/15 bg-[#0B1327]/60 text-slate-300 hover:text-white"
+                      }`}
+                    >
+                      تحليل صورة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCameraAnalyzeMode("video")}
+                      className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
+                        cameraAnalyzeMode === "video"
+                          ? "border-brand-sky/45 bg-brand/20 text-sky-100"
+                          : "border-white/15 bg-[#0B1327]/60 text-slate-300 hover:text-white"
+                      }`}
+                    >
+                      تحليل فيديو
+                    </button>
+                  </div>
                   <label className="mb-2 block text-xs text-slate-400">ربط التحليل بكاميرا مسجلة (اختياري)</label>
                   <select
                     value={monitoringCameraSelectId}
@@ -1675,39 +2609,103 @@ export default function Dashboard() {
                       </option>
                     ))}
                   </select>
-                  <label className="mb-1 block text-xs font-medium text-slate-300">اختيار صورة اختبار</label>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setCameraTestFile(e.target.files?.[0] || null)}
-                    className="mb-3 w-full rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-sm text-slate-200"
-                  />
-                  {!cameraTestFile ? (
-                    <div className="mb-3 rounded-xl border border-dashed border-white/15 bg-[#0B1327]/40 px-3 py-4 text-center text-sm text-slate-400">
-                      اختر صورة مطبخ لاختبار فحص السلامة
-                    </div>
-                  ) : null}
-                  {cameraTestPreviewUrl ? (
-                    <div className="mb-3 rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
-                      <img src={cameraTestPreviewUrl} alt="" className="block max-h-72 w-full object-contain" />
-                    </div>
-                  ) : null}
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={monitoringAnalyzeLoading || !cameraTestFile}
-                      onClick={() => void analyzeMonitoringFrameUpload()}
-                      className="rounded-xl border border-brand-sky/35 bg-brand/15 px-4 py-2 text-xs font-semibold text-brand-sky disabled:opacity-50"
-                    >
-                      {monitoringAnalyzeLoading ? (
-                        <span className="inline-flex items-center gap-2">
-                          <Spinner className="h-4 w-4 border-2 border-white/30 border-t-white" />
-                          جاري التحليل…
-                        </span>
+                  {cameraAnalyzeMode === "image" ? (
+                    <>
+                      <label className="mb-1 block text-xs font-medium text-slate-300">اختيار صورة اختبار</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => setCameraTestFile(e.target.files?.[0] || null)}
+                        className="mb-3 w-full rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-sm text-slate-200"
+                      />
+                      {!cameraTestFile ? (
+                        <div className="mb-3 rounded-xl border border-dashed border-white/15 bg-[#0B1327]/40 px-3 py-4 text-center text-sm text-slate-400">
+                          اختر صورة مطبخ لاختبار فحص السلامة
+                        </div>
+                      ) : null}
+                      {cameraTestPreviewUrl ? (
+                        <div className="mb-3 rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                          <img src={cameraTestPreviewUrl} alt="" className="block max-h-72 w-full object-contain" />
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <label className="mb-1 block text-xs font-medium text-slate-300">اختيار فيديو اختبار</label>
+                      <input
+                        type="file"
+                        accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+                        onChange={(e) => onSelectMonitoringVideoFile(e.target.files?.[0] || null)}
+                        className="mb-3 w-full rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-sm text-slate-200"
+                      />
+                      {cameraVideoError ? (
+                        <div className="mb-3 rounded-xl border border-accent-red/35 bg-accent-red/10 px-3 py-3 text-sm text-red-200">
+                          {cameraVideoError}
+                        </div>
+                      ) : null}
+                      {cameraVideoFile ? (
+                        <div className="mb-3 rounded-xl border border-white/10 bg-[#060d1f]/80 p-3 text-xs text-slate-300">
+                          <p>الاسم: <span className="text-slate-100">{cameraVideoFile.name}</span></p>
+                          <p className="mt-1">الحجم: <span className="text-slate-100">{formatFileBytes(cameraVideoFile.size)}</span></p>
+                          <p className="mt-1">المدة: <span className="text-slate-100">{formatVideoDuration(cameraVideoDurationSec)}</span></p>
+                        </div>
                       ) : (
-                        "تحليل الصورة"
+                        <div className="mb-3 rounded-xl border border-dashed border-white/15 bg-[#0B1327]/40 px-3 py-4 text-center text-sm text-slate-400">
+                          اختر فيديو مطبخ بصيغة mp4 أو mov أو webm
+                        </div>
                       )}
-                    </button>
+                      {cameraVideoPreviewUrl ? (
+                        <div className="mb-3 rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                          <video
+                            src={cameraVideoPreviewUrl}
+                            controls
+                            className="block max-h-72 w-full rounded-lg bg-black object-contain"
+                            onLoadedMetadata={(e) => {
+                              const dur = Number(e.currentTarget.duration);
+                              setCameraVideoDurationSec(Number.isFinite(dur) ? dur : null);
+                            }}
+                          />
+                        </div>
+                      ) : null}
+                      <div className="mb-3 rounded-xl border border-sky-500/35 bg-sky-500/10 px-3 py-3 text-sm text-sky-100">
+                        سيتم تحليل الفيديو على شكل لقطات متتابعة باستخدام endpoint التحليل الحالي.
+                      </div>
+                    </>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {cameraAnalyzeMode === "image" ? (
+                      <button
+                        type="button"
+                        disabled={monitoringAnalyzeLoading || !cameraTestFile}
+                        onClick={() => void analyzeMonitoringFrameUpload()}
+                        className="rounded-xl border border-brand-sky/35 bg-brand/15 px-4 py-2 text-xs font-semibold text-brand-sky disabled:opacity-50"
+                      >
+                        {monitoringAnalyzeLoading ? (
+                          <span className="inline-flex items-center gap-2">
+                            <Spinner className="h-4 w-4 border-2 border-white/30 border-t-white" />
+                            جاري التحليل…
+                          </span>
+                        ) : (
+                          "تحليل الصورة"
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={monitoringVideoAnalyzeLoading || !cameraVideoFile}
+                        onClick={() => void analyzeMonitoringVideoUpload()}
+                        className="rounded-xl border border-brand-sky/35 bg-brand/15 px-4 py-2 text-xs font-semibold text-brand-sky disabled:opacity-50"
+                      >
+                        {monitoringVideoAnalyzeLoading ? (
+                          <span className="inline-flex items-center gap-2">
+                            <Spinner className="h-4 w-4 border-2 border-white/30 border-t-white" />
+                            جاري تحليل الفيديو...
+                          </span>
+                        ) : (
+                          "تحليل الفيديو"
+                        )}
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled
@@ -1717,6 +2715,14 @@ export default function Dashboard() {
                       تشغيل الكاميرا المباشرة
                     </button>
                   </div>
+                  {cameraAnalyzeMode === "video" ? (
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      يتم حفظ المخالفات المكتشفة عبر تنبيهات النظام عند توفر شروط الحفظ في backend.
+                    </p>
+                  ) : null}
+                  {cameraAnalyzeMode === "video" && monitoringVideoProgressText ? (
+                    <p className="mt-1 text-xs text-slate-400">{monitoringVideoProgressText}</p>
+                  ) : null}
                   {monitoringLastAnalyzedAt ? (
                     <p className="mt-2 text-[11px] text-slate-500">
                       آخر تحليل: {formatSaudiDateTime(monitoringLastAnalyzedAt)}
@@ -1724,7 +2730,7 @@ export default function Dashboard() {
                   ) : null}
                 </div>
 
-                {monitoringAnalysisResult && Array.isArray(monitoringAnalysisResult.checks) ? (
+                {cameraAnalyzeMode === "image" && monitoringAnalysisResult && Array.isArray(monitoringAnalysisResult.checks) ? (
                   <div>
                     <div className="mb-2 flex flex-wrap items-center gap-2 gap-y-1">
                       <span className="text-sm font-semibold text-white">نتيجة التحليل</span>
@@ -1768,20 +2774,151 @@ export default function Dashboard() {
                   </div>
                 ) : null}
 
+                {cameraAnalyzeMode === "video" ? (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-white">نتائج تحليل الفيديو</span>
+                      <span className="text-xs text-slate-400">تنبيهات محفوظة: {monitoringVideoAlertsCreated}</span>
+                    </div>
+                    <div className="mb-3 rounded-xl border border-white/10 bg-[#060d1f]/70 p-3 text-xs text-slate-300">
+                      <p>
+                        عدد اللقطات المحللة: <span className="font-semibold text-slate-100">{monitoringVideoFrameResults.length}</span>
+                      </p>
+                      <p className="mt-1">
+                        أوقات اللقطات:{" "}
+                        <span className="text-slate-100">
+                          {monitoringVideoAnalyzedTimes.length
+                            ? monitoringVideoAnalyzedTimes.map((t) => formatVideoDuration(t)).join("، ")
+                            : "—"}
+                        </span>
+                      </p>
+                    </div>
+
+                    {import.meta.env.DEV ? (
+                      <div className="mb-3 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3 text-xs text-amber-100">
+                        <p>ملخص تطوير: endpoint = {MONITORING_ANALYZE_URL}</p>
+                        <p className="mt-1">frames sent = {monitoringVideoFrameResults.length}</p>
+                        <p className="mt-1">raw violation count = {monitoringVideoRawViolationCount}</p>
+                      </div>
+                    ) : null}
+
+                    {monitoringVideoFrameResults.length > 0 ? (
+                      <div className="mb-4">
+                        <p className="mb-2 text-xs font-semibold text-slate-300">نتيجة كل لقطة</p>
+                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                          {monitoringVideoFrameResults.map((frame) => (
+                            <article key={frame.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 p-3 text-xs text-slate-200">
+                              {frame.frameUrl ? (
+                                <img src={frame.frameUrl} alt="" className="mb-2 h-24 w-full rounded-lg object-cover" />
+                              ) : null}
+                              <p className="text-slate-400">
+                                الوقت: <span className="text-slate-100">{formatVideoDuration(frame.atSecond)}</span>
+                              </p>
+                              {frame.errorText ? (
+                                <p className="mt-1 text-red-200">{frame.errorText}</p>
+                              ) : frame.violations.length === 0 ? (
+                                <p className="mt-1 text-emerald-200">لا توجد مخالفة</p>
+                              ) : (
+                                <div className="mt-1 space-y-1">
+                                  {frame.violations.map((v) => (
+                                    <p key={v.id}>
+                                      <span className="text-slate-100">{v.type}</span> · {displayAiConfidence(v.confidence)}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {monitoringVideoResults.length === 0 ? (
+                      videoAllFramesFailed ? (
+                        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-5 text-center text-sm text-red-200">
+                          تعذر تحليل الفيديو. تحقق من إعدادات الذكاء الاصطناعي.
+                        </div>
+                      ) : monitoringVideoFrameResults.length > 0 ? (
+                        <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/50 px-3 py-5 text-center text-sm text-slate-400">
+                          تم تحليل اللقطات — لا توجد مخالفات مكتشفة.
+                        </div>
+                      ) : null
+                    ) : (
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {monitoringVideoResults.map((v) => (
+                          <article key={v.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 p-3 text-xs text-slate-200">
+                            <p className="font-semibold text-white">{v.type}</p>
+                            <p className="mt-1 text-slate-400">
+                              الوقت داخل الفيديو: <span className="text-slate-200">{formatVideoDuration(v.atSecond)}</span>
+                            </p>
+                            <p className="mt-1 text-slate-400">
+                              الثقة: <span className="text-slate-200">{displayAiConfidence(v.confidence)}</span>
+                            </p>
+                            <p className="mt-1 text-slate-400">
+                              الحالة: <span className="text-slate-200">{monitoringAlertStatusAr(v.status)}</span>
+                            </p>
+                            {v.reason ? <p className="mt-1 text-[11px] text-slate-400">{v.reason}</p> : null}
+                            {monitoringVideoFrameResults.find((f) => f.id === v.frameId)?.frameUrl ? (
+                              <img
+                                src={monitoringVideoFrameResults.find((f) => f.id === v.frameId)?.frameUrl}
+                                alt=""
+                                className="mt-2 h-28 w-full rounded-lg object-cover"
+                              />
+                            ) : null}
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
                 {cameraCardsLoading ? (
-                  <p className="text-sm text-slate-400">جاري تحميل الكاميرات...</p>
+                  <div className="space-y-3" aria-busy="true">
+                    <SkeletonPulse className="h-24 w-full" />
+                    <SkeletonPulse className="h-24 w-full" />
+                  </div>
+                ) : cameraCardsError ? (
+                  <p className="rounded-xl border border-accent-red/35 bg-accent-red/10 px-3 py-4 text-sm text-red-200">{cameraCardsError}</p>
                 ) : cameraCards.length === 0 ? (
-                  <p className="text-sm text-slate-400">لا توجد كاميرات مضافة بعد.</p>
+                  <p className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/50 px-3 py-6 text-center text-sm text-slate-400">
+                    لا يوجد بث مباشر متصل حاليًا
+                  </p>
                 ) : (
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-slate-400">حالة الكاميرات</p>
+                    {cameraCards.some((c) => c?.is_connected && String(c?.stream_url || c?.streamUrl || "").trim()) ? null : (
+                      <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/50 px-3 py-4 text-center text-sm text-slate-400">
+                        لا يوجد بث مباشر متصل حاليًا
+                      </div>
+                    )}
                     {cameraCards.map((c) => (
-                      <article key={c.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 p-3 text-xs text-slate-200">
-                        <p className="font-semibold text-white">{c.name}</p>
-                        <p>الموقع: {c.location}</p>
-                        <p>الاتصال: {c.is_connected ? "متصل" : "غير متصل"}</p>
-                        <p>الذكاء الاصطناعي: {c.ai_enabled ? "مفعّل" : "غير مفعّل"}</p>
-                        <p>آخر تحليل: {c.last_analysis_at ? formatSaudiDateTime(c.last_analysis_at) : "لا يوجد"}</p>
+                      <article
+                        key={c.id}
+                        className="rounded-xl border border-white/10 bg-gradient-to-br from-[#0B1327]/90 to-[#060d1f]/80 p-4 text-xs text-slate-200 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-white/5 pb-2">
+                          <p className="text-sm font-semibold text-white">{c.name}</p>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              c.is_connected ? "bg-emerald-500/15 text-emerald-200" : "bg-slate-600/30 text-slate-400"
+                            }`}
+                          >
+                            {c.is_connected ? "متصل" : "غير متصل"}
+                          </span>
+                        </div>
+                        <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+                          <p>
+                            <span className="text-slate-500">الموقع:</span> {c.location}
+                          </p>
+                          <p>
+                            <span className="text-slate-500">الذكاء الاصطناعي:</span>{" "}
+                            {c.ai_enabled ? "مفعّل" : "غير مفعّل"}
+                          </p>
+                          <p className="sm:col-span-2">
+                            <span className="text-slate-500">آخر تحليل:</span>{" "}
+                            {c.last_analysis_at ? formatSaudiDateTime(c.last_analysis_at) : "لا يوجد"}
+                          </p>
+                        </div>
                       </article>
                     ))}
                   </div>
@@ -1792,10 +2929,13 @@ export default function Dashboard() {
             <section className={`${glassCard} mb-8 p-5`}>
               <div className="mb-4 border-b border-white/10 pb-3">
                 <h3 className="text-lg font-bold text-white">نظرة عامة على الأداء</h3>
+                <p className="mt-1 text-xs text-slate-400">أرقام تشغيلية من خادم النظام.</p>
               </div>
               {supervisorSummaryLoading ? (
-                <div className="rounded-xl border border-white/10 bg-[#020617]/60 px-4 py-10 text-center text-sm text-slate-400">
-                  جاري تحميل البيانات...
+                <div className="grid gap-3 sm:grid-cols-2" aria-busy="true">
+                  {[1, 2, 3, 4].map((i) => (
+                    <SkeletonPulse key={i} className="h-24 w-full" />
+                  ))}
                 </div>
               ) : supervisorSummary ? (
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -1824,11 +2964,28 @@ export default function Dashboard() {
             </section>
 
             <section id="reports" ref={supervisorReportsRef} className={`${glassCard} mb-8 p-5`}>
-              <div className="mb-4 border-b border-white/10 pb-3">
-                <h3 className="text-lg font-bold text-white">التقارير</h3>
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
+                <div>
+                  <h3 className="text-lg font-bold text-white">التقارير</h3>
+                  <p className="mt-1 text-xs text-slate-400">مؤشرات ملخّصة من الخادم؛ تصدير CSV للملفات والتحليل الخارجي.</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={!supervisorSummary}
+                  onClick={() => exportSupervisorReportCsv()}
+                  className="rounded-xl border border-brand-sky/40 bg-brand/15 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-brand/25 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  تصدير CSV
+                </button>
               </div>
-                  {supervisorSummary ? (
-                    <div className="grid gap-3">
+              {supervisorSummaryLoading ? (
+                <div className="grid gap-3 sm:grid-cols-2" aria-busy="true">
+                  {[1, 2, 3, 4].map((i) => (
+                    <SkeletonPulse key={i} className="h-[4.5rem] w-full" />
+                  ))}
+                </div>
+              ) : supervisorSummary ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <div className="rounded-xl border border-white/10 bg-[#0B1327]/70 p-3">
                         <p className="text-xs text-slate-500">أكثر موظف لديه مراجعات</p>
                         <p className="mt-1 text-sm font-semibold text-white">
@@ -1860,8 +3017,231 @@ export default function Dashboard() {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-sm text-slate-400">لا توجد بيانات كافية</p>
+                    <div className="rounded-xl border border-dashed border-white/10 bg-[#0B1327]/50 px-4 py-10 text-center text-sm text-slate-400">
+                      لا توجد بيانات كافية للتقارير. تأكد من اتصال الخادم أو من صلاحيات المشرف.
+                    </div>
                   )}
+              {role === "admin" ? (
+                <div className="mt-8 border-t border-white/10 pt-6">
+                  <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <h4 className="text-base font-bold text-white">تقرير مخالفات المراقبة</h4>
+                      <p className="mt-1 text-xs text-slate-400">
+                        بيانات من تنبيهات المراقبة المحفوظة في النظام (حتى 500 سجلًا لكل استعلام).
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setViolationsReportFrom("");
+                          setViolationsReportTo("");
+                          void fetchViolationsReport("", "");
+                        }}
+                        className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-white/25 hover:text-white"
+                      >
+                        إظهار الكل
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void fetchViolationsReport(violationsReportFrom, violationsReportTo)}
+                        className="rounded-xl border border-brand-sky/40 bg-brand/15 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-brand/25"
+                      >
+                        تطبيق الفلتر
+                      </button>
+                      <button
+                        type="button"
+                        disabled={violationsReportLoading || violationsReportStats.total === 0}
+                        onClick={() => exportViolationsReportLatestCsv()}
+                        className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        تصدير CSV
+                      </button>
+                      <button
+                        type="button"
+                        disabled={violationsReportLoading || violationsReportStats.total === 0}
+                        onClick={() => printViolationsReportPdf()}
+                        title="طباعة أو حفظ PDF عبر نافذة المتصفح (اختر «حفظ كملف PDF»)"
+                        className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        تصدير PDF
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                      <span className="text-xs text-slate-400">من تاريخ</span>
+                      <input
+                        type="date"
+                        value={violationsReportFrom}
+                        onChange={(e) => setViolationsReportFrom(e.target.value)}
+                        className="mt-2 w-full rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-brand-sky/50"
+                      />
+                    </label>
+                    <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                      <span className="text-xs text-slate-400">إلى تاريخ</span>
+                      <input
+                        type="date"
+                        value={violationsReportTo}
+                        onChange={(e) => setViolationsReportTo(e.target.value)}
+                        className="mt-2 w-full rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-brand-sky/50"
+                      />
+                    </label>
+                    <div className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3 sm:col-span-2">
+                      <p className="text-xs text-slate-400">النطاق الزمني</p>
+                      <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                        يعتمد تقويم الرياض. اترك الحقلين فارغَين ثم اضغط «تطبيق الفلتر» لعرض أحدث السجلات دون
+                        تقييد بالتاريخ.
+                      </p>
+                    </div>
+                  </div>
+                  {violationsReportError ? (
+                    <div className="mb-4 rounded-xl border border-accent-red/35 bg-accent-red/10 px-3 py-3 text-sm text-red-200">
+                      {violationsReportError}
+                    </div>
+                  ) : null}
+                  {violationsReportLoading ? (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+                      {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <SkeletonPulse key={i} className="h-24 w-full" />
+                      ))}
+                    </div>
+                  ) : violationsReportStats.total === 0 ? (
+                    <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/50 px-4 py-10 text-center text-sm text-slate-400">
+                      لا توجد مخالفات مسجّلة في النطاق الحالي.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="rounded-xl border border-white/10 bg-[#020617]/70 p-4">
+                          <p className="text-xs text-slate-500">إجمالي المخالفات</p>
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-white">{violationsReportStats.total}</p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-[#020617]/70 p-4">
+                          <p className="text-xs text-slate-500">مفتوح</p>
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-amber-200">
+                            {violationsReportStats.openCount}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-[#020617]/70 p-4">
+                          <p className="text-xs text-slate-500">تمت المعالجة</p>
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-200">
+                            {violationsReportStats.resolvedCount}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-brand-sky/25 bg-brand/10 p-4">
+                          <p className="text-xs text-slate-500">أكثر مخالفة تكرارًا</p>
+                          {violationsReportStats.topRepeated.count > 0 ? (
+                            <>
+                              <p className="mt-1 text-sm font-semibold text-white">
+                                {violationsReportStats.topRepeated.label}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-400">
+                                {violationsReportStats.topRepeated.count} مرة
+                              </p>
+                            </>
+                          ) : (
+                            <p className="mt-1 text-sm text-slate-500">لا توجد بيانات</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+                        <div className="rounded-xl border border-white/10 bg-[#060d1f]/60 p-4">
+                          <p className="mb-3 text-sm font-semibold text-white">المخالفات حسب النوع</p>
+                          <ul className="space-y-2 text-sm">
+                            {VIOLATION_REPORT_CATEGORY_ORDER.map((c) => (
+                              <li key={c.key} className="flex items-center justify-between gap-2 text-slate-300">
+                                <span>{c.label}</span>
+                                <span className="tabular-nums font-semibold text-slate-100">
+                                  {violationsReportStats.typeCounts[c.key]}
+                                </span>
+                              </li>
+                            ))}
+                            {violationsReportStats.typeCounts._other > 0 ? (
+                              <li className="flex items-center justify-between gap-2 border-t border-white/10 pt-2 text-slate-400">
+                                <span>أخرى</span>
+                                <span className="tabular-nums font-semibold text-slate-200">
+                                  {violationsReportStats.typeCounts._other}
+                                </span>
+                              </li>
+                            ) : null}
+                          </ul>
+                        </div>
+                        <div className="rounded-xl border border-white/10 bg-[#060d1f]/60 p-4">
+                          <p className="mb-3 text-sm font-semibold text-white">حسب الحالة</p>
+                          <ul className="space-y-3 text-sm">
+                            <li className="flex items-center justify-between gap-2">
+                              <span className="text-slate-400">مفتوح</span>
+                              <span className="tabular-nums font-bold text-amber-200">
+                                {violationsReportStats.openCount}
+                              </span>
+                            </li>
+                            <li>
+                              <div className="h-2 overflow-hidden rounded-full bg-[#020617]">
+                                <div
+                                  className="h-full rounded-full bg-amber-500/70 transition-all"
+                                  style={{
+                                    width: `${violationsReportStats.total ? Math.round((violationsReportStats.openCount / violationsReportStats.total) * 100) : 0}%`,
+                                  }}
+                                />
+                              </div>
+                            </li>
+                            <li className="flex items-center justify-between gap-2">
+                              <span className="text-slate-400">تمت المعالجة</span>
+                              <span className="tabular-nums font-bold text-emerald-200">
+                                {violationsReportStats.resolvedCount}
+                              </span>
+                            </li>
+                            <li>
+                              <div className="h-2 overflow-hidden rounded-full bg-[#020617]">
+                                <div
+                                  className="h-full rounded-full bg-emerald-500/70 transition-all"
+                                  style={{
+                                    width: `${violationsReportStats.total ? Math.round((violationsReportStats.resolvedCount / violationsReportStats.total) * 100) : 0}%`,
+                                  }}
+                                />
+                              </div>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="mb-3 text-sm font-semibold text-white">أحدث المخالفات</p>
+                        <div className="overflow-x-auto rounded-xl border border-white/10">
+                          <table className="min-w-full text-start text-xs sm:text-sm">
+                            <thead className="border-b border-white/10 bg-[#0B1327]/80 text-slate-400">
+                              <tr>
+                                <th className="px-3 py-2">النوع</th>
+                                <th className="px-3 py-2">التفاصيل</th>
+                                <th className="px-3 py-2">الحالة</th>
+                                <th className="px-3 py-2">الفرع</th>
+                                <th className="px-3 py-2">الكاميرا</th>
+                                <th className="px-3 py-2">الوقت</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5 text-slate-200">
+                              {violationsReportStats.latest.map((row) => (
+                                <tr key={row.id} className="bg-[#060d1f]/40">
+                                  <td className="px-3 py-2 font-medium text-white">
+                                    {violationReportTypeLabel(row.type) || row.label_ar || row.type || "—"}
+                                  </td>
+                                  <td className="max-w-[14rem] truncate px-3 py-2 text-slate-400" title={row.details}>
+                                    {row.details || "—"}
+                                  </td>
+                                  <td className="px-3 py-2">{monitoringAlertStatusAr(row.status)}</td>
+                                  <td className="px-3 py-2">{row.branch || "—"}</td>
+                                  <td className="px-3 py-2">{row.camera_name || "—"}</td>
+                                  <td className="whitespace-nowrap px-3 py-2">{formatSaudiDateTime(row.created_at)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </section>
 
             <section id="dish-reviews" ref={supervisorReviewsRef} className={`${glassCard} mb-8 p-5`}>
@@ -1870,13 +3250,23 @@ export default function Dashboard() {
                   <h3 className="text-lg font-bold text-white">مراجعة الأطباق</h3>
                   <p className="text-sm text-slate-400">اعتماد أو رفض سجلات الأطباق مع تتبع سجل المراجعة.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void loadSupervisorReviews()}
-                  className="rounded-xl border border-brand-sky/35 bg-brand/15 px-3 py-2 text-xs font-semibold text-brand-sky transition hover:bg-brand/25"
-                >
-                  تحديث
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={!reviewRecords.length}
+                    onClick={() => exportReviewRecordsCsv()}
+                    className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    تصدير CSV ({reviewRecords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadSupervisorReviews()}
+                    className="rounded-xl border border-brand-sky/35 bg-brand/15 px-3 py-2 text-xs font-semibold text-brand-sky transition hover:bg-brand/25"
+                  >
+                    تحديث
+                  </button>
+                </div>
               </div>
 
               <div className="mb-3 flex flex-wrap gap-2">
@@ -1982,16 +3372,25 @@ export default function Dashboard() {
               </div>
 
               {reviewLoading ? (
-                <div className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-8 text-center text-sm text-slate-400">
-                  جاري تحميل سجلات المراجعة...
+                <div className="space-y-3" aria-busy="true">
+                  {[1, 2, 3].map((i) => (
+                    <SkeletonPulse key={i} className="h-40 w-full" />
+                  ))}
                 </div>
               ) : reviewRecords.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/60 px-3 py-8 text-center text-sm text-slate-400">
-                  لا توجد أطباق تحتاج مراجعة حاليًا
+                  {reviewFiltersAreActive
+                    ? "لا توجد سجلات تطابق الفلاتر الحالية. جرّب توسيع نطاق البحث أو تغيير حالة المراجعة."
+                    : "لا توجد سجلات ضمن العرض الافتراضي (يحتاج مراجعة) حالياً."}
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {reviewRecords.map((r) => {
+                  {reviewTotalPages > 1 ? (
+                    <p className="text-center text-xs text-slate-500">
+                      عرض الصفحة {reviewPage} من {reviewTotalPages} · إجمالي {reviewRecords.length} سجلًا
+                    </p>
+                  ) : null}
+                  {pagedReviewRecords.map((r) => {
                     const conf = Number(r.ai_confidence);
                     const confText = displayAiConfidence(conf);
                     const badge =
@@ -2000,15 +3399,17 @@ export default function Dashboard() {
                         : r.status === "rejected"
                           ? "border-accent-red/45 bg-accent-red/15 text-red-100"
                           : "border-accent-amber/45 bg-accent-amber/15 text-amber-100";
+                    const statusLabel =
+                      r.status === "approved" ? "تم الاعتماد" : r.status === "rejected" ? "مرفوض" : "يحتاج مراجعة";
                     const suggestions = Array.isArray(r.ai_suggestions) ? r.ai_suggestions.slice(0, 3) : [];
                     return (
-                      <article key={r.id} className="rounded-2xl border border-white/10 bg-[#060d1f]/85 p-4 sm:p-5">
+                      <article key={r.id} className="rounded-2xl border border-white/10 bg-[#060d1f]/85 p-4 shadow-glass sm:p-5">
                         <div className="flex flex-col gap-5 lg:flex-row lg:items-stretch">
-                          <FoodImageThumb src={r.image_url} alt={r.confirmed_label || r.predicted_label || "dish"} sizeClass="h-28 w-28 shrink-0 sm:h-32 sm:w-32" />
+                          <FoodImageThumb src={r.image_url} alt={r.confirmed_label || r.predicted_label || "dish"} sizeClass="h-32 w-32 shrink-0 rounded-xl sm:h-36 sm:w-36" />
                           <div className="min-w-0 flex-1 space-y-3">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${badge}`}>
-                                {supervisorStatusText(r.status)}
+                                {statusLabel}
                               </span>
                             </div>
                             <p className="text-sm text-slate-400">
@@ -2090,6 +3491,32 @@ export default function Dashboard() {
                       </article>
                     );
                   })}
+                  {reviewTotalPages > 1 ? (
+                    <nav
+                      className="flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-4"
+                      aria-label="ترقيم صفحات المراجعة"
+                    >
+                      <button
+                        type="button"
+                        disabled={reviewPage <= 1}
+                        onClick={() => setReviewPage((p) => Math.max(1, p - 1))}
+                        className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        السابق
+                      </button>
+                      <span className="text-xs tabular-nums text-slate-500">
+                        {reviewPage} / {reviewTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={reviewPage >= reviewTotalPages}
+                        onClick={() => setReviewPage((p) => Math.min(reviewTotalPages, p + 1))}
+                        className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        التالي
+                      </button>
+                    </nav>
+                  ) : null}
                 </div>
               )}
             </section>
@@ -2144,20 +3571,33 @@ export default function Dashboard() {
                 </label>
               </div>
               {supervisorEmployeesLoading ? (
-                <div className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-8 text-center text-sm text-slate-400">
-                  جاري تحميل بيانات الموظفين...
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <SkeletonPulse key={i} className="h-36 w-full" />
+                  ))}
                 </div>
               ) : supervisorEmployees.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/60 px-3 py-8 text-center text-sm text-slate-400">
-                  لا توجد بيانات كافية
+                  {employeeFiltersAreActive
+                    ? "لا يوجد موظفون يطابقون الفلاتر الحالية."
+                    : "لا توجد بيانات موظفين من الخادم حتى الآن."}
                 </div>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {supervisorEmployees.map((e) => (
+                  {employeeTotalPages > 1 ? (
+                    <p className="col-span-full text-center text-xs text-slate-500">
+                      عرض {(employeePage - 1) * EMPLOYEE_PAGE_SIZE + 1}–
+                      {Math.min(employeePage * EMPLOYEE_PAGE_SIZE, supervisorEmployees.length)} من{" "}
+                      {supervisorEmployees.length}
+                    </p>
+                  ) : null}
+                  {pagedSupervisorEmployees.map((e) => (
                     <article key={e.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 p-3">
                       <p className="font-semibold text-white">
                         {e.full_name || e.username}
-                        <span className="ms-2 text-xs font-normal text-slate-400">({e.branch_name || "فرع تجريبي"})</span>
+                        <span className="ms-2 text-xs font-normal text-slate-400">
+                          ({e.branch_name?.trim() ? e.branch_name : "—"})
+                        </span>
                       </p>
                       <p className="mt-1 text-xs text-slate-400" dir="ltr">{e.email}</p>
                       <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
@@ -2180,6 +3620,32 @@ export default function Dashboard() {
                       </div>
                     </article>
                   ))}
+                  {employeeTotalPages > 1 ? (
+                    <nav
+                      className="col-span-full flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-4"
+                      aria-label="ترقيم صفحات الموظفين"
+                    >
+                      <button
+                        type="button"
+                        disabled={employeePage <= 1}
+                        onClick={() => setEmployeePage((p) => Math.max(1, p - 1))}
+                        className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        السابق
+                      </button>
+                      <span className="text-xs tabular-nums text-slate-500">
+                        {employeePage} / {employeeTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={employeePage >= employeeTotalPages}
+                        onClick={() => setEmployeePage((p) => Math.min(employeeTotalPages, p + 1))}
+                        className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        التالي
+                      </button>
+                    </nav>
+                  ) : null}
                 </div>
               )}
             </section>
@@ -2207,14 +3673,228 @@ export default function Dashboard() {
               </section>
             ) : null}
 
-            {role === "admin" ? (
-              <section id="settings" className={`${glassCard} mt-6`}>
-                <h3 className="mb-2 text-lg font-bold text-white">إعدادات النظام</h3>
-                <p className="text-sm text-slate-400">
-                  إعدادات النظام متاحة فقط لمدير النظام.
-                </p>
-              </section>
-            ) : null}
+            <section id="settings" ref={supervisorSettingsRef} className={`${glassCard} mt-6`}>
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
+                <div>
+                  <h3 className="text-lg font-bold text-white">إعدادات النظام</h3>
+                  <p className="text-xs text-slate-400">هذه الإعدادات محلية على المتصفح الحالي فقط (localStorage).</p>
+                </div>
+                {role === "admin" ? (
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={resetAdminSettings}
+                      className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-white/30 hover:text-white"
+                    >
+                      إعادة الافتراضي
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveAdminSettings}
+                      disabled={adminSettingsSaving}
+                      className="rounded-xl border border-brand-sky/40 bg-brand/20 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-brand/30 disabled:opacity-60"
+                    >
+                      {adminSettingsSaving ? "جارٍ الحفظ..." : "حفظ الإعدادات"}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              {role !== "admin" ? (
+                <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/60 px-4 py-6 text-sm text-slate-300">
+                  هذه الإعدادات متاحة لمدير النظام فقط
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
+                    <h4 className="text-sm font-semibold text-white">إعدادات الذكاء الاصطناعي</h4>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                        <span className="text-xs text-slate-400">الحد الأدنى للثقة</span>
+                        <div className="mt-2 flex items-center gap-3">
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={adminSettings.ai.minConfidence}
+                            onChange={(e) =>
+                              setAdminSettings((prev) => ({
+                                ...prev,
+                                ai: { ...prev.ai, minConfidence: Number(e.target.value) || 0 },
+                              }))
+                            }
+                            className="w-full accent-sky-400"
+                          />
+                          <span className="min-w-10 text-sm font-semibold text-sky-100">
+                            {adminSettings.ai.minConfidence}%
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {[
+                        ["mask", "الكمامة"],
+                        ["gloves", "القفازات"],
+                        ["headCover", "غطاء الرأس"],
+                        ["wetFloor", "الأرضيات المبللة"],
+                        ["containers", "الحاويات"],
+                      ].map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="flex items-center justify-between rounded-xl border border-white/10 bg-[#060d1f]/80 px-3 py-2 text-sm text-slate-200"
+                        >
+                          <span>{label}</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={Boolean(adminSettings.ai.violations[key])}
+                            onClick={() =>
+                              setAdminSettings((prev) => ({
+                                ...prev,
+                                ai: {
+                                  ...prev.ai,
+                                  violations: {
+                                    ...prev.ai.violations,
+                                    [key]: !prev.ai.violations[key],
+                                  },
+                                },
+                              }))
+                            }
+                            className={`relative h-6 w-11 rounded-full transition ${
+                              adminSettings.ai.violations[key] ? "bg-sky-500/70" : "bg-slate-700"
+                            }`}
+                          >
+                            <span
+                              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
+                                adminSettings.ai.violations[key] ? "right-0.5" : "right-[1.35rem]"
+                              }`}
+                            />
+                          </button>
+                        </label>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
+                    <h4 className="text-sm font-semibold text-white">إعدادات التنبيهات</h4>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="flex items-center justify-between rounded-xl border border-white/10 bg-[#060d1f]/80 px-3 py-2 text-sm text-slate-200">
+                        <span>تفعيل التنبيهات محلياً</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={adminSettings.alerts.enabled}
+                          onClick={() =>
+                            setAdminSettings((prev) => ({
+                              ...prev,
+                              alerts: { ...prev.alerts, enabled: !prev.alerts.enabled },
+                            }))
+                          }
+                          className={`relative h-6 w-11 rounded-full transition ${
+                            adminSettings.alerts.enabled ? "bg-sky-500/70" : "bg-slate-700"
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
+                              adminSettings.alerts.enabled ? "right-0.5" : "right-[1.35rem]"
+                            }`}
+                          />
+                        </button>
+                      </label>
+                      <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                        <span className="text-xs text-slate-400">الحدّة الافتراضية للتنبيه</span>
+                        <select
+                          value={adminSettings.alerts.defaultSeverity}
+                          onChange={(e) =>
+                            setAdminSettings((prev) => ({
+                              ...prev,
+                              alerts: { ...prev.alerts, defaultSeverity: e.target.value },
+                            }))
+                          }
+                          className="mt-2 w-full rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-brand-sky/50"
+                        >
+                          <option value="low">منخفض</option>
+                          <option value="medium">متوسط</option>
+                          <option value="high">عالي</option>
+                        </select>
+                      </label>
+                    </div>
+                  </article>
+
+                  <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
+                    <h4 className="text-sm font-semibold text-white">إعدادات التقارير</h4>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <button
+                        type="button"
+                        disabled={!hasPdfExport}
+                        onClick={() =>
+                          setAdminSettings((prev) => ({
+                            ...prev,
+                            reports: { ...prev.reports, pdfEnabled: !prev.reports.pdfEnabled },
+                          }))
+                        }
+                        className="flex items-center justify-between rounded-xl border border-white/10 bg-[#060d1f]/80 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <span>تفعيل تصدير PDF</span>
+                        <span className="text-xs text-slate-400">{hasPdfExport ? "متاح" : "غير متاح حالياً"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!hasExcelExport}
+                        onClick={() =>
+                          setAdminSettings((prev) => ({
+                            ...prev,
+                            reports: { ...prev.reports, excelEnabled: !prev.reports.excelEnabled },
+                          }))
+                        }
+                        className="flex items-center justify-between rounded-xl border border-white/10 bg-[#060d1f]/80 px-3 py-2 text-sm text-slate-200 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <span>تفعيل تصدير Excel</span>
+                        <span className="text-xs text-slate-400">{hasExcelExport ? "متاح" : "غير متاح حالياً"}</span>
+                      </button>
+                    </div>
+                  </article>
+
+                  <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
+                    <h4 className="text-sm font-semibold text-white">إعدادات النظام</h4>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                      <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                        <span className="text-xs text-slate-400">اسم المنصة المعروض</span>
+                        <input
+                          type="text"
+                          value={adminSettings.system.platformName}
+                          onChange={(e) =>
+                            setAdminSettings((prev) => ({
+                              ...prev,
+                              system: { ...prev.system, platformName: e.target.value },
+                            }))
+                          }
+                          className="mt-2 w-full rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-sm text-slate-100 outline-none focus:border-brand-sky/50"
+                        />
+                      </label>
+                      <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                        <span className="text-xs text-slate-400">اللغة الافتراضية</span>
+                        <input
+                          type="text"
+                          value={adminSettings.system.defaultLanguage}
+                          disabled
+                          className="mt-2 w-full rounded-xl border border-white/10 bg-[#0B1327]/50 px-3 py-2 text-sm text-slate-300"
+                        />
+                      </label>
+                      <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
+                        <span className="text-xs text-slate-400">المنطقة الزمنية</span>
+                        <input
+                          type="text"
+                          value={adminSettings.system.timezone}
+                          disabled
+                          className="mt-2 w-full rounded-xl border border-white/10 bg-[#0B1327]/50 px-3 py-2 text-sm text-slate-300"
+                        />
+                      </label>
+                    </div>
+                  </article>
+                </div>
+              )}
+            </section>
           </>
         )}
 
@@ -2332,6 +4012,115 @@ export default function Dashboard() {
           </div>
         ) : null}
       </main>
+      </div>
+      {role === "admin" && violationsReportStats.total > 0 ? (
+        <div
+          id="ska-violations-report-print"
+          dir="rtl"
+          lang="ar"
+          style={{
+            position: "fixed",
+            left: "-9999px",
+            top: 0,
+            width: "210mm",
+            pointerEvents: "none",
+          }}
+          aria-hidden
+        >
+          <header className="mb-4 border-b border-slate-300 pb-3">
+            <h1 className="text-xl font-bold text-slate-900">تقرير مخالفات المراقبة</h1>
+            <p className="mt-1 text-xs text-slate-600">
+              وقت التصدير: {formatSaudiDateTime(new Date())}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              نطاق التواريخ في التقرير: من {violationsReportFrom?.trim() || "—"} إلى{" "}
+              {violationsReportTo?.trim() || "—"}
+            </p>
+          </header>
+          <section className="mb-5">
+            <h2 className="mb-2 text-sm font-semibold text-slate-900">ملخص</h2>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-[11px] text-slate-500">إجمالي المخالفات</p>
+                <p className="text-lg font-bold text-slate-900">{violationsReportStats.total}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-[11px] text-slate-500">مفتوح</p>
+                <p className="text-lg font-bold text-slate-900">{violationsReportStats.openCount}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-[11px] text-slate-500">تمت المعالجة</p>
+                <p className="text-lg font-bold text-slate-900">{violationsReportStats.resolvedCount}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-[11px] text-slate-500">أكثر مخالفة تكرارًا</p>
+                {violationsReportStats.topRepeated.count > 0 ? (
+                  <>
+                    <p className="text-sm font-semibold text-slate-900">{violationsReportStats.topRepeated.label}</p>
+                    <p className="text-[11px] text-slate-600">{violationsReportStats.topRepeated.count} مرة</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-500">لا توجد بيانات</p>
+                )}
+              </div>
+            </div>
+          </section>
+          <section className="mb-5">
+            <h2 className="mb-2 text-sm font-semibold text-slate-900">المخالفات حسب النوع</h2>
+            <table className="w-full border-collapse text-sm text-slate-900">
+              <thead>
+                <tr className="border-b border-slate-300 bg-slate-100">
+                  <th className="px-2 py-2 text-start font-semibold">النوع</th>
+                  <th className="px-2 py-2 text-start font-semibold">العدد</th>
+                </tr>
+              </thead>
+              <tbody>
+                {VIOLATION_REPORT_CATEGORY_ORDER.map((c) => (
+                  <tr key={c.key} className="border-b border-slate-200">
+                    <td className="px-2 py-1.5">{c.label}</td>
+                    <td className="px-2 py-1.5 tabular-nums">{violationsReportStats.typeCounts[c.key]}</td>
+                  </tr>
+                ))}
+                {violationsReportStats.typeCounts._other > 0 ? (
+                  <tr className="border-b border-slate-200">
+                    <td className="px-2 py-1.5">أخرى</td>
+                    <td className="px-2 py-1.5 tabular-nums">{violationsReportStats.typeCounts._other}</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </section>
+          <section>
+            <h2 className="mb-2 text-sm font-semibold text-slate-900">أحدث المخالفات (كل الأعمدة)</h2>
+            <table className="w-full border-collapse text-xs text-slate-900">
+              <thead>
+                <tr className="border-b border-slate-300 bg-slate-100">
+                  <th className="px-1 py-2 text-start font-semibold">النوع</th>
+                  <th className="px-1 py-2 text-start font-semibold">التفاصيل</th>
+                  <th className="px-1 py-2 text-start font-semibold">الحالة</th>
+                  <th className="px-1 py-2 text-start font-semibold">الفرع</th>
+                  <th className="px-1 py-2 text-start font-semibold">الكاميرا</th>
+                  <th className="px-1 py-2 text-start font-semibold">الوقت</th>
+                </tr>
+              </thead>
+              <tbody>
+                {violationsReportStats.latest.map((row) => (
+                  <tr key={row.id} className="border-b border-slate-200 align-top">
+                    <td className="px-1 py-1.5 font-medium">
+                      {violationReportTypeLabel(row.type) || row.label_ar || row.type || "—"}
+                    </td>
+                    <td className="max-w-[12rem] px-1 py-1.5 break-words text-slate-700">{row.details || "—"}</td>
+                    <td className="px-1 py-1.5 whitespace-nowrap">{monitoringAlertStatusAr(row.status)}</td>
+                    <td className="px-1 py-1.5">{row.branch || "—"}</td>
+                    <td className="px-1 py-1.5">{row.camera_name || "—"}</td>
+                    <td className="px-1 py-1.5 whitespace-nowrap">{formatSaudiDateTime(row.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

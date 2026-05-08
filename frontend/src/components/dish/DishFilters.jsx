@@ -173,21 +173,57 @@ export default function DishFilters({
       </div>
 
       {/* 5. Stats strip */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-        {[
-          { icon: <IconActivity className="h-4 w-4 text-brand-sky" />,    label: "اليوم",       value: dishStats.today,    tone: "text-white" },
-          { icon: <IconDish    className="h-4 w-4 text-accent-green" />,  label: "الإجمالي",    value: dishStats.total,    tone: "text-white" },
-          { icon: null,                                                     label: "أكثر طبق",    value: dishStats.topDish,  tone: "text-brand-sky text-sm" },
-          { icon: <IconBell   className="h-4 w-4 text-accent-amber" />,   label: "مراجعة",      value: dishStats.review,   tone: "text-amber-200" },
-          { icon: <IconChart  className="h-4 w-4 text-brand-sky" />,      label: "الكمية",      value: dishStats.totalQty, tone: "text-white" },
-        ].map((s, i) => (
-          <div key={i} className="rounded-xl border border-white/10 bg-[#060d1f]/90 px-3 py-2.5">
-            <p className="text-[10px] font-medium text-slate-500">{s.label}</p>
-            <p className={`mt-0.5 flex items-center gap-1.5 text-lg font-bold ${s.tone}`}>
-              {s.icon}{s.value}
-            </p>
-          </div>
-        ))}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-500">ملخص سريع</p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {[
+            {
+              icon: <IconActivity className="h-5 w-5 text-sky-300" />,
+              label: "اليوم",
+              value: dishStats.today,
+              valueClass: "text-slate-50",
+            },
+            {
+              icon: <IconDish className="h-5 w-5 text-teal-200/90" />,
+              label: "الإجمالي",
+              value: dishStats.total,
+              valueClass: "text-slate-50",
+            },
+            {
+              icon: <IconDish className="h-5 w-5 text-sky-200/80" />,
+              label: "أكثر طبق",
+              value: dishStats.topDish,
+              valueClass: "text-sm font-semibold text-sky-100 sm:text-base",
+            },
+            {
+              icon: <IconBell className="h-5 w-5 text-amber-200/85" />,
+              label: "مراجعة",
+              value: dishStats.review,
+              valueClass: "text-amber-50/95",
+            },
+            {
+              icon: <IconChart className="h-5 w-5 text-slate-200" />,
+              label: "الكمية",
+              value: dishStats.totalQty,
+              valueClass: "text-slate-50",
+            },
+          ].map((s, i) => (
+            <div
+              key={i}
+              className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-[#0B1327]/55 px-3 py-3 sm:px-4 sm:py-3.5"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] ring-1 ring-white/10">
+                {s.icon}
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{s.label}</p>
+                <p className={`mt-1 break-words text-lg font-bold leading-tight tabular-nums sm:text-xl ${s.valueClass}`}>
+                  {s.value}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* 6. Secondary filters grid */}

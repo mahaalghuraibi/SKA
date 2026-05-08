@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ACCESS_TOKEN_KEY } from "../constants.js";
+import SKALogo from "../components/SKALogo.jsx";
 
 const USERS_URL = "/api/v1/users";
 const ADMIN_CREATE_URL = "/api/v1/users/admin-create";
@@ -13,8 +14,6 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [isMock, setIsMock] = useState(false);
-
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -53,14 +52,9 @@ export default function AdminUsersPage() {
         return;
       }
       setUsers(Array.isArray(data) ? data : []);
-      setIsMock(false);
     } catch {
-      setUsers([
-        { id: 1, email: "staff@example.com", role: "staff", tenant_id: 1, name: null, status: "نشط" },
-        { id: 2, email: "supervisor@example.com", role: "supervisor", tenant_id: 1, name: null, status: "نشط" },
-      ]);
-      setIsMock(true);
-      setError("تعذر الاتصال بالـ API. تم عرض بيانات تجريبية.");
+      setUsers([]);
+      setError("تعذر الاتصال بالخادم. يرجى التحقق من الشبكة والمحاولة مرة أخرى.");
     } finally {
       setLoading(false);
     }
@@ -160,11 +154,8 @@ export default function AdminUsersPage() {
 
       <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-3 py-3 sm:px-6">
-          <Link to="/dashboard" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-brand-sky text-sm font-bold text-white shadow-lg shadow-brand/25">
-              S
-            </span>
-            <span className="font-bold text-white">SKA</span>
+          <Link to="/dashboard" className="flex items-center">
+            <SKALogo compact />
           </Link>
           <Link to="/dashboard" className="text-sm font-medium text-slate-400 transition hover:text-brand-sky">
             العودة للوحة التحكم
@@ -176,12 +167,6 @@ export default function AdminUsersPage() {
         <section className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass-lg backdrop-blur-xl sm:rounded-3xl sm:p-6">
           <h1 className="text-xl font-bold text-white sm:text-2xl">إدارة المستخدمين</h1>
           <p className="mt-1 text-sm text-slate-400">إضافة المستخدمين وتعديل الصلاحيات</p>
-          {isMock ? (
-            <span className="mt-3 inline-flex rounded-full border border-brand-sky/30 bg-brand-sky/10 px-3 py-1 text-xs text-brand-sky">
-              تجريبي
-            </span>
-          ) : null}
-
           {error ? (
             <div className="mt-4 rounded-xl border border-accent-red/40 bg-accent-red/10 px-3 py-2.5 text-sm text-red-200">
               {error}
@@ -255,33 +240,41 @@ export default function AdminUsersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user) => (
-                    <tr key={user.id} className="border-b border-white/5 text-slate-200">
-                      <td className="px-3 py-2.5">{user.full_name || user.username || "—"}</td>
-                      <td className="px-3 py-2.5">{user.email}</td>
-                      <td className="px-3 py-2.5">
-                        <select
-                          value={user.role}
-                          onChange={(e) => handleRoleChange(user.id, e.target.value)}
-                          className="rounded-lg border border-white/10 bg-[#020617]/60 px-2 py-1 text-xs text-white"
-                        >
-                          <option value="staff">staff</option>
-                          <option value="supervisor">supervisor</option>
-                          <option value="admin">admin</option>
-                        </select>
-                      </td>
-                      <td className="px-3 py-2.5">{user.status || "نشط"}</td>
-                      <td className="px-3 py-2.5">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteUser(user.id)}
-                          className="rounded-lg border border-accent-red/40 bg-accent-red/10 px-2.5 py-1 text-xs text-red-200 transition hover:bg-accent-red/20"
-                        >
-                          حذف
-                        </button>
+                  {users.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-10 text-center text-sm text-slate-500">
+                        لا يوجد مستخدمون لعرضهم. أضف مستخدماً جديداً أو تحقق من الصلاحيات.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    users.map((user) => (
+                      <tr key={user.id} className="border-b border-white/5 text-slate-200">
+                        <td className="px-3 py-2.5">{user.full_name || user.username || "—"}</td>
+                        <td className="px-3 py-2.5">{user.email}</td>
+                        <td className="px-3 py-2.5">
+                          <select
+                            value={user.role}
+                            onChange={(e) => handleRoleChange(user.id, e.target.value)}
+                            className="rounded-lg border border-white/10 bg-[#020617]/60 px-2 py-1 text-xs text-white"
+                          >
+                            <option value="staff">staff</option>
+                            <option value="supervisor">supervisor</option>
+                            <option value="admin">admin</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2.5">{user.status || "نشط"}</td>
+                        <td className="px-3 py-2.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUser(user.id)}
+                            className="rounded-lg border border-accent-red/40 bg-accent-red/10 px-2.5 py-1 text-xs text-red-200 transition hover:bg-accent-red/20"
+                          >
+                            حذف
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             )}

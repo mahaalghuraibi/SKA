@@ -57,8 +57,23 @@ class Settings:
     # Professional vision stack (image-only; no filename heuristics in classifier)
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_VISION_MODEL: str = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_VISION_MODEL: str = os.getenv("GEMINI_VISION_MODEL", "gemini-1.5-flash")
+    # Shared/legacy Gemini envs (kept for backward compatibility).
+    _GEMINI_LEGACY_RAW: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_API_KEY: str = _GEMINI_LEGACY_RAW.strip()
+    GEMINI_VISION_MODEL: str = os.getenv("GEMINI_VISION_MODEL", "gemini-2.0-flash")
+    # Dish vision: optional dedicated model id (falls back to GEMINI_VISION_MODEL).
+    DISH_GEMINI_MODEL: str = os.getenv(
+        "DISH_GEMINI_MODEL",
+        os.getenv("GEMINI_VISION_MODEL", "gemini-2.0-flash"),
+    )
+    # Split keys by domain (dish vs monitoring) with safe fallback to legacy key.
+    DISH_GEMINI_API_KEY: str = (os.getenv("DISH_GEMINI_API_KEY") or "").strip() or GEMINI_API_KEY
+    MONITORING_GEMINI_API_KEY: str = (os.getenv("MONITORING_GEMINI_API_KEY") or "").strip() or GEMINI_API_KEY
+    # Monitoring model prefers dedicated env first, then legacy model env.
+    MONITORING_GEMINI_MODEL: str = os.getenv(
+        "MONITORING_GEMINI_MODEL",
+        os.getenv("GEMINI_VISION_MODEL", "gemini-2.0-flash"),
+    )
     YOLO_MODEL_PATH: str = os.getenv("YOLO_MODEL_PATH", "")
     YOLO_CONF_THRESHOLD: float = float(os.getenv("YOLO_CONF_THRESHOLD", "0.35"))
     FOOD101_HF_MODEL_ID: str = os.getenv("FOOD101_HF_MODEL_ID", "nateraw/vit-base-food101")

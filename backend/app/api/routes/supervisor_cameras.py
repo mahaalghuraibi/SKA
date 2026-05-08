@@ -1,6 +1,7 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -21,6 +22,17 @@ router = APIRouter(
     tags=["supervisor-cameras"],
     dependencies=[Depends(require_roles("supervisor", "admin"))],
 )
+
+_RIYADH = ZoneInfo("Asia/Riyadh")
+
+
+def _riyadh_day_start_utc(d: date) -> datetime:
+    start_local = datetime.combine(d, time.min, tzinfo=_RIYADH)
+    return start_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _riyadh_day_end_exclusive_utc(d: date) -> datetime:
+    return _riyadh_day_start_utc(d + timedelta(days=1))
 
 
 def _ensure_supervisor_branch(current_user: User) -> None:
@@ -120,6 +132,9 @@ def update_supervisor_camera(
 
 @router.get("/alerts", response_model=list[SupervisorAlertOut])
 def list_supervisor_alerts(
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    limit: int = Query(default=80, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[SupervisorAlertOut]:
@@ -131,7 +146,11 @@ def list_supervisor_alerts(
     )
     if current_user.role == "supervisor":
         q = q.filter(MonitoringAlert.branch_id == current_user.branch_id)
-    rows = q.limit(80).all()
+    if date_from is not None:
+        q = q.filter(MonitoringAlert.created_at >= _riyadh_day_start_utc(date_from))
+    if date_to is not None:
+        q = q.filter(MonitoringAlert.created_at < _riyadh_day_end_exclusive_utc(date_to))
+    rows = q.limit(limit).all()
     return [_alert_to_out(r) for r in rows]
 
 

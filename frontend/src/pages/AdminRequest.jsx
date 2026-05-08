@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import SKALogo from "../components/SKALogo.jsx";
 
 const ADMIN_REQUEST_URL = "/api/v1/admin-requests";
 
@@ -61,11 +62,8 @@ export default function AdminRequestPage() {
 
       <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-6">
-          <Link to="/" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-brand-sky text-sm font-bold text-white shadow-lg shadow-brand/25">
-              S
-            </span>
-            <span className="font-bold text-white">SKA</span>
+          <Link to="/" className="flex items-center">
+            <SKALogo compact />
           </Link>
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-4">
             <Link

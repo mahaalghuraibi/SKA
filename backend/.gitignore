@@ -1,2 +1,16 @@
+# Python virtual environments
+.venv/
+venv/
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local env files
+.env
+.env.*
+
 # Uploaded dish thumbnails (generated at runtime)
 media/

@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import SKALogo from "../components/SKALogo.jsx";
 
 function IconCamera({ className }) {
   return (
@@ -122,11 +124,72 @@ function KitchenVisualMock() {
 }
 
 const navLinkClass =
-  "text-sm text-slate-400 transition hover:text-brand-sky hover:shadow-[0_0_20px_-4px_rgba(56,189,248,0.35)]";
+  "relative rounded-md px-1.5 py-1 text-sm text-slate-400 transition duration-200 hover:text-brand-sky hover:drop-shadow-[0_0_10px_rgba(56,189,248,0.28)] focus-visible:text-brand-sky";
 const navActiveClass =
-  "relative text-sm text-white after:absolute after:-bottom-3 after:start-0 after:h-0.5 after:w-full after:rounded-full after:bg-gradient-to-r after:from-brand after:to-brand-sky after:shadow-[0_0_16px_rgba(56,189,248,0.55)]";
+  "relative rounded-md px-1.5 py-1 text-sm font-medium text-white after:absolute after:-bottom-2.5 after:start-0 after:h-0.5 after:w-full after:rounded-full after:bg-gradient-to-r after:from-brand after:to-brand-sky after:shadow-[0_0_14px_rgba(56,189,248,0.6)]";
 
 export default function LandingPage() {
+  const [activeSection, setActiveSection] = useState("home");
+  const navItems = useMemo(
+    () => [
+      { id: "home", label: "الرئيسية" },
+      { id: "analytics", label: "الرقابة الذكية" },
+      { id: "alerts", label: "التنبيهات" },
+      { id: "reports", label: "جاهزية التشغيل" },
+    ],
+    []
+  );
+
+  useEffect(() => {
+    const getSections = () =>
+      navItems
+        .map((item) => {
+          const node = document.getElementById(item.id);
+          if (!(node instanceof HTMLElement)) return null;
+          return { id: item.id, top: node.offsetTop };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.top - b.top);
+
+    let sections = getSections();
+    if (sections.length === 0) return undefined;
+
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y < 48) {
+        setActiveSection("home");
+        return;
+      }
+
+      const docHeight = document.documentElement.scrollHeight;
+      if (window.innerHeight + y >= docHeight - 24) {
+        setActiveSection("reports");
+        return;
+      }
+
+      const activationY = y + 140;
+      let current = "home";
+      for (const section of sections) {
+        if (section.top <= activationY) current = section.id;
+      }
+      setActiveSection(current);
+    };
+
+    const onResize = () => {
+      sections = getSections();
+      onScroll();
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onResize);
+    onScroll();
+
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [navItems]);
+
   const serviceModules = [
     {
       title: "مراقبة الامتثال اللحظي",
@@ -164,69 +227,59 @@ export default function LandingPage() {
     <div className="min-h-screen bg-surface text-slate-100 antialiased">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(37,99,235,0.18),transparent)]" />
 
-      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0F172A]/80 shadow-lg shadow-black/20 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-3 py-3 sm:gap-4 sm:px-6 lg:px-8">
-          <Link to="/" className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-brand to-brand-sky text-xs font-bold text-white shadow-lg shadow-brand/30 sm:h-10 sm:w-10 sm:text-sm">
-              S
-            </span>
-            <span className="truncate text-base font-bold tracking-tight text-white sm:text-lg">SKA</span>
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0F172A]/78 shadow-[0_8px_24px_-16px_rgba(2,6,23,0.95)] backdrop-blur-2xl">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-brand-sky/45 to-transparent" />
+        <div className="relative mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-3 py-2.5 sm:gap-4 sm:px-6 lg:flex-nowrap lg:px-8">
+          <Link to="/" className="flex min-w-0 shrink-0 items-center">
+            <SKALogo />
           </Link>
 
-          <nav className="hidden flex-1 items-center justify-center gap-4 md:flex lg:gap-8">
-            <Link to="/" className={navActiveClass}>
-              الرئيسية
-            </Link>
-            <a href="#analytics" className={navLinkClass}>
-              التحليلات
-            </a>
-            <a href="#alerts" className={navLinkClass}>
-              التنبيهات
-            </a>
-            <a href="#reports" className={navLinkClass}>
-              التقارير
-            </a>
-            <a href="#settings" className={navLinkClass}>
-              الإعدادات
-            </a>
+          <nav className="hidden flex-1 items-center justify-center gap-6 lg:flex xl:gap-10">
+            {navItems.map((item) => (
+              <a
+                key={item.id}
+                href={`#${item.id}`}
+                aria-label={`الانتقال إلى قسم ${item.label}`}
+                aria-current={activeSection === item.id ? "page" : undefined}
+                className={activeSection === item.id ? navActiveClass : navLinkClass}
+              >
+                {item.label}
+              </a>
+            ))}
           </nav>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <Link
               to="/register"
-              className="inline-flex min-h-[44px] min-w-[7.5rem] items-center justify-center rounded-xl border border-white/15 bg-[rgba(15,23,42,0.72)] px-3 text-xs font-semibold text-slate-100 backdrop-blur-md transition hover:border-brand-sky/40 hover:bg-[#1a2644] sm:min-w-0 sm:px-4 sm:text-sm"
+              className="inline-flex min-h-[40px] min-w-[7rem] items-center justify-center rounded-xl border border-white/15 bg-[rgba(15,23,42,0.72)] px-3 text-xs font-semibold text-slate-100 backdrop-blur-md transition hover:border-brand-sky/40 hover:bg-[#1a2644] sm:min-w-0 sm:px-4 sm:text-sm"
             >
               إنشاء حساب
             </Link>
             <Link
               to="/login"
-              className="inline-flex min-h-[44px] min-w-[7.5rem] items-center justify-center rounded-xl bg-brand px-3 text-xs font-semibold text-white shadow-md shadow-brand/30 transition hover:bg-blue-600 hover:shadow-glow-sm sm:min-w-0 sm:px-4 sm:text-sm"
+              className="inline-flex min-h-[40px] min-w-[7rem] items-center justify-center rounded-xl bg-brand px-3 text-xs font-semibold text-white shadow-md shadow-brand/30 transition hover:bg-blue-600 hover:shadow-glow-sm sm:min-w-0 sm:px-4 sm:text-sm"
             >
               تسجيل الدخول
             </Link>
           </div>
         </div>
-        <nav className="flex gap-3 overflow-x-auto overscroll-x-contain border-t border-white/5 px-3 py-2.5 [-webkit-overflow-scrolling:touch] md:hidden">
-          <Link to="/" className={`shrink-0 ${navActiveClass} after:-bottom-2`}>
-            الرئيسية
-          </Link>
-          <a href="#analytics" className={`shrink-0 ${navLinkClass}`}>
-            التحليلات
-          </a>
-          <a href="#alerts" className={`shrink-0 ${navLinkClass}`}>
-            التنبيهات
-          </a>
-          <a href="#reports" className={`shrink-0 ${navLinkClass}`}>
-            التقارير
-          </a>
-          <a href="#settings" className={`shrink-0 ${navLinkClass}`}>
-            الإعدادات
-          </a>
+        <nav className="flex gap-2.5 overflow-x-auto overscroll-x-contain border-t border-white/5 px-3 py-2 [-webkit-overflow-scrolling:touch] lg:hidden">
+          {navItems.map((item) => (
+            <a
+              key={item.id}
+              href={`#${item.id}`}
+              aria-label={`الانتقال إلى قسم ${item.label}`}
+              aria-current={activeSection === item.id ? "page" : undefined}
+              className={`shrink-0 ${activeSection === item.id ? `${navActiveClass} after:-bottom-1.5` : navLinkClass}`}
+            >
+              {item.label}
+            </a>
+          ))}
         </nav>
       </header>
 
       <main>
-        <section className="relative overflow-hidden pb-16 pt-8 sm:pb-20 sm:pt-12 lg:pb-24 lg:pt-16" aria-label="المقدمة">
+        <section id="home" className="scroll-mt-28 relative overflow-hidden pb-16 pt-8 sm:scroll-mt-32 sm:pb-20 sm:pt-12 lg:pb-24 lg:pt-16" aria-label="المقدمة">
           <div className="absolute inset-0 overflow-hidden">
             <div className="absolute inset-0 hero-bg-zoom">
               <div className="absolute inset-0 hero-parallax-deep">
@@ -252,17 +305,17 @@ export default function LandingPage() {
             <div className="overflow-hidden rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass-lg backdrop-blur-xl sm:p-6 md:p-8 lg:rounded-3xl lg:p-10 xl:p-12">
               <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-12 xl:gap-16">
                 <div className="order-2 text-start lg:order-1">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-sky/90 sm:text-sm">
-                    Smart Kitchen Analytics
+                  <p className="text-sm font-medium text-cyan-300/90 sm:text-base">
+                    الرقابة والتوثيق الذكي للمطابخ
                   </p>
                   <h1 className="mt-4 text-3xl font-extrabold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl xl:text-[3.25rem] xl:leading-[1.15]">
                     نظام SKA للرقابة والتوثيق الذكي للمطابخ
                   </h1>
-                  <p className="mt-5 max-w-xl text-sm leading-relaxed text-slate-400 sm:text-base">
+                  <p className="mt-6 max-w-xl text-sm leading-relaxed text-slate-400 sm:text-base">
                     لوحة مراقبة حديثة للمطابخ الاحترافية: رؤية ذكاء اصطناعي، تنبيهات
                     فورية، وتوثيق أدق — بتجربة SaaS راقية وواجهة عربية كاملة.
                   </p>
-                  <div className="mt-8 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:flex-wrap sm:gap-4">
+                  <div className="mt-8 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
                     <Link
                       to="/register"
                       className="inline-flex min-h-[48px] items-center justify-center rounded-xl border-2 border-white/20 bg-[rgba(15,23,42,0.72)] px-8 text-sm font-semibold text-white backdrop-blur-md transition hover:border-brand-sky/50 hover:bg-[#1a2644] hover:shadow-glow-sm sm:min-h-[50px]"
@@ -276,7 +329,7 @@ export default function LandingPage() {
                       الدخول للمنصة
                     </Link>
                     <a
-                      href="#services"
+                      href="#analytics"
                       className="inline-flex min-h-[48px] items-center justify-center rounded-xl border-2 border-white/20 bg-[rgba(15,23,42,0.72)] px-8 text-sm font-semibold text-white backdrop-blur-md transition hover:border-brand-sky/50 hover:bg-[#1a2644] hover:shadow-glow-sm sm:min-h-[50px]"
                     >
                       استعراض الخدمات
@@ -284,7 +337,7 @@ export default function LandingPage() {
                   </div>
                 </div>
 
-                <div className="order-1 lg:order-2">
+                <div className="order-1 scale-[1.1] drop-shadow-[0_18px_45px_rgba(56,189,248,0.16)] lg:order-2 lg:scale-[1.12]">
                   <KitchenVisualMock />
                 </div>
               </div>
@@ -292,7 +345,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="analytics" className="scroll-mt-24 border-t border-white/5 px-4 py-10 sm:px-6 sm:py-12 lg:px-8 lg:py-14">
+        <section id="analytics" className="scroll-mt-28 border-t border-white/5 px-4 py-10 sm:scroll-mt-32 sm:px-6 sm:py-12 lg:px-8 lg:py-14">
           <div className="mx-auto mb-6 max-w-7xl rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl sm:p-6">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-sky/90">منصة خدمة تشغيلية</p>
             <h2 className="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl">
@@ -415,7 +468,7 @@ export default function LandingPage() {
               </article>
             </div>
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div id="features" className="mt-6 grid scroll-mt-28 gap-4 sm:scroll-mt-32 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 "أمان عالي",
                 "توثيق ذكي",
@@ -433,7 +486,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section id="reports" className="scroll-mt-24 border-t border-white/10 px-4 py-10 sm:px-6 lg:px-8">
+        <section id="reports" className="scroll-mt-28 border-t border-white/10 px-4 py-10 sm:scroll-mt-32 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <div className="mb-5 text-start sm:mb-6">
               <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">خطة الجاهزية والتشغيل</h2>
@@ -441,7 +494,7 @@ export default function LandingPage() {
                 مسار واضح للانتقال من الإعداد الأولي إلى منصة متابعة يومية قابلة للتوسع.
               </p>
             </div>
-            <div className="grid gap-4 md:grid-cols-3">
+            <div id="dish-documentation" className="grid scroll-mt-28 gap-4 sm:scroll-mt-32 md:grid-cols-3">
               {readinessSteps.map((step) => (
                 <article
                   key={step.title}
@@ -455,15 +508,12 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <footer id="settings" className="scroll-mt-24 border-t border-white/10 bg-[#0B1120] px-4 py-12 sm:px-6 sm:py-14 lg:px-8">
+        <footer className="scroll-mt-24 border-t border-white/10 bg-[#0B1120] px-4 py-12 sm:px-6 sm:py-14 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <div className="mb-10 flex flex-col gap-8 border-b border-white/10 pb-10 md:flex-row md:items-start md:justify-between md:gap-12">
               <div className="max-w-lg">
-                <div className="mb-4 flex items-center gap-2.5">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-brand-sky text-sm font-bold text-white shadow-lg shadow-brand/25">
-                    S
-                  </span>
-                  <span className="text-lg font-bold tracking-tight text-white">SKA</span>
+                <div className="mb-4">
+                  <SKALogo />
                 </div>
                 <h3 className="mb-2 text-base font-semibold text-white sm:text-lg">حول المنصة</h3>
                 <p className="text-sm leading-relaxed text-slate-400 sm:text-[15px]">

@@ -127,7 +127,7 @@ function buildNormalizedDetectResult(data) {
     topConfRatio != null ? Math.round(Math.max(0, Math.min(1, topConfRatio)) * 100 * 10) / 10 : null;
   const proteinConflict = Boolean(data?.protein_conflict);
   const needsReviewLowConf =
-    (topConfRatio != null && Number.isFinite(topConfRatio) && topConfRatio < 0.75) ||
+    (topConfRatio != null && Number.isFinite(topConfRatio) && topConfRatio < 0.45) ||
     (topConfRatio == null && Boolean(data?.needs_review));
   return {
     detected: detectedDishName,

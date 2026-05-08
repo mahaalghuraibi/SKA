@@ -1,8 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ACCESS_TOKEN_KEY } from "../constants.js";
+import SKALogo from "../components/SKALogo.jsx";
 
 const ADMIN_REQUESTS_URL = "/api/v1/admin-requests";
+
+function downloadUtf8Csv(filename, headerRow, rows) {
+  const esc = (v) => {
+    const s = v == null ? "" : String(v);
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lines = [headerRow.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))];
+  const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 function statusLabelAr(status) {
   if (status === "pending") return "قيد المراجعة";
@@ -20,6 +39,12 @@ export default function AdminRequestsPage() {
   const [error, setError] = useState("");
   const [toast, setToast] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const filteredRequests = useMemo(() => {
+    if (statusFilter === "all") return requests;
+    return requests.filter((r) => r.status === statusFilter);
+  }, [requests, statusFilter]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -95,6 +120,20 @@ export default function AdminRequestsPage() {
     }
   }
 
+  function exportFilteredCsv() {
+    if (!filteredRequests.length) {
+      setToast({ variant: "error", text: "لا توجد صفوف للتصدير في هذا العرض." });
+      return;
+    }
+    const filename = `ska-admin-requests-${statusFilter}-${new Date().toISOString().slice(0, 10)}.csv`;
+    downloadUtf8Csv(
+      filename,
+      ["id", "name", "email", "company", "phone", "reason", "status"],
+      filteredRequests.map((r) => [r.id, r.name, r.email, r.company, r.phone, r.reason, r.status]),
+    );
+    setToast({ variant: "success", text: "تم تنزيل ملف CSV." });
+  }
+
   return (
     <div className="relative flex min-h-screen flex-col bg-surface text-slate-100" dir="rtl">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -106,11 +145,8 @@ export default function AdminRequestsPage() {
 
       <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-3 py-3 sm:px-6">
-          <Link to="/dashboard" className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-brand-sky text-sm font-bold text-white shadow-lg shadow-brand/25">
-              S
-            </span>
-            <span className="font-bold text-white">SKA</span>
+          <Link to="/dashboard" className="flex items-center">
+            <SKALogo compact />
           </Link>
           <Link to="/dashboard" className="text-sm font-medium text-slate-400 transition hover:text-brand-sky">
             العودة للوحة التحكم
@@ -120,8 +156,20 @@ export default function AdminRequestsPage() {
 
       <main className="relative z-10 mx-auto w-full max-w-7xl px-3 py-6 sm:px-6 sm:py-8 lg:px-8">
         <section className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass-lg backdrop-blur-xl sm:rounded-3xl sm:p-6">
-          <h1 className="text-xl font-bold text-white sm:text-2xl">طلبات الحساب الإداري</h1>
-          <p className="mt-1 text-sm text-slate-400">مراجعة طلبات الترقية إلى Admin</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-white sm:text-2xl">طلبات الحساب الإداري</h1>
+              <p className="mt-1 text-sm text-slate-400">مراجعة طلبات الترقية إلى Admin</p>
+            </div>
+            <button
+              type="button"
+              disabled={!filteredRequests.length}
+              onClick={() => exportFilteredCsv()}
+              className="rounded-xl border border-brand-sky/40 bg-brand/15 px-3 py-2 text-xs font-semibold text-sky-100 transition hover:bg-brand/25 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              تصدير CSV ({filteredRequests.length})
+            </button>
+          </div>
 
           {error ? (
             <div className="mt-4 rounded-xl border border-accent-red/40 bg-accent-red/10 px-3 py-2.5 text-sm text-red-200">
@@ -129,14 +177,45 @@ export default function AdminRequestsPage() {
             </div>
           ) : null}
 
-          <div className="mt-6 overflow-x-auto">
+          <div className="mt-4 flex flex-wrap gap-2 border-b border-white/10 pb-4">
+            {[
+              { value: "all", label: "الكل" },
+              { value: "pending", label: "قيد المراجعة" },
+              { value: "approved", label: "مقبول" },
+              { value: "rejected", label: "مرفوض" },
+            ].map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setStatusFilter(t.value)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                  statusFilter === t.value
+                    ? "border-brand-sky/60 bg-brand/30 text-sky-100"
+                    : "border-white/15 bg-[#0B1327]/70 text-slate-300 hover:border-white/25"
+                }`}
+              >
+                {t.label}
+                {t.value === "all"
+                  ? ` (${requests.length})`
+                  : ` (${requests.filter((r) => r.status === t.value).length})`}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-4 overflow-x-auto">
             {loading ? (
-              <div className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-6 text-center text-sm text-slate-400">
-                جاري تحميل الطلبات...
+              <div className="space-y-2 p-1" aria-busy="true">
+                {[1, 2, 3, 4, 5, 6].map((i) => (
+                  <div key={i} className="h-14 animate-pulse rounded-xl bg-gradient-to-l from-white/[0.04] to-white/[0.09]" />
+                ))}
               </div>
             ) : requests.length === 0 ? (
-              <div className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-6 text-center text-sm text-slate-400">
+              <div className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-10 text-center text-sm text-slate-400">
                 لا توجد طلبات حتى الآن.
+              </div>
+            ) : filteredRequests.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/60 px-3 py-10 text-center text-sm text-slate-400">
+                لا توجد طلبات تطابق الفلتر المحدد.
               </div>
             ) : (
               <table className="min-w-full text-sm">
@@ -152,7 +231,7 @@ export default function AdminRequestsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {requests.map((req) => {
+                  {filteredRequests.map((req) => {
                     const rowBusy = actionLoading?.id === req.id;
                     const isPending = req.status === "pending";
                     const buttonsDisabled = loading || rowBusy || !isPending;

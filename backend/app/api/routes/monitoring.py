@@ -75,7 +75,14 @@ async def analyze_frame(
             raise HTTPException(status_code=503, detail=msg) from exc
         if "الصورة غير صالحة" in msg:
             raise HTTPException(status_code=400, detail=msg) from exc
-        raise HTTPException(status_code=500, detail=msg) from exc
+        # Gemini / dependency failures are service configuration issues, not 500.
+        if (
+            "فشل تحليل الصورة" in msg
+            or "Gemini" in msg
+            or "تعذر تحميل مكتبات" in msg
+        ):
+            raise HTTPException(status_code=503, detail=msg) from exc
+        raise HTTPException(status_code=503, detail=msg) from exc
     except Exception:
         logger.exception("monitoring analyze unexpected error")
         raise HTTPException(
@@ -156,6 +163,7 @@ async def analyze_frame(
     db.commit()
 
     return MonitoringAnalyzeResponse(
+        ok=bool(payload.get("ok", True)),
         status=str(payload.get("status", "ok")),
         provider=str(payload.get("provider", "")),
         camera_name=payload.get("camera_name"),
@@ -166,4 +174,5 @@ async def analyze_frame(
         checks=[MonitoringCheckOut(**c) for c in (payload.get("checks") or [])],
         violations=[MonitoringViolationOut(**c) for c in (payload.get("violations") or [])],
         alerts_created=alerts_created,
+        summary=str(payload.get("summary", "")),
     )
