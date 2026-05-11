@@ -34,7 +34,7 @@ typing_extensions==4.15.0
 urllib3==2.6.3
 uvicorn==0.45.0
 slowapi==0.1.9
-inference-sdk==1.2.5
+inference-sdk
 openai>=1.40.0
 google-genai>=1.0.0
 transformers>=4.40.0
