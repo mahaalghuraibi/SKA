@@ -33,25 +33,33 @@ export default function DishDocSection({
   onSave,
 }) {
   return (
-    <article className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] shadow-glass backdrop-blur-xl transition duration-300 hover:border-white/15 hover:shadow-glass-lg overflow-hidden p-0">
+    <article
+      className="overflow-hidden rounded-2xl border border-white/12 bg-[rgba(15,23,42,0.68)] shadow-[0_0_52px_-16px_rgba(56,189,248,0.18),0_12px_40px_-20px_rgba(0,0,0,0.45)] backdrop-blur-xl ring-1 ring-white/[0.06] transition duration-300 hover:border-brand-sky/25 hover:shadow-[0_0_60px_-12px_rgba(56,189,248,0.22)] p-0"
+      data-aos="fade-up"
+      data-aos-duration="760"
+    >
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4 sm:px-6">
+      <div className="relative flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[linear-gradient(180deg,rgba(56,189,248,0.06)_0%,transparent_65%)] px-5 py-4 sm:px-6">
         <div>
-          <h3 className="text-lg font-bold text-white">توثيق الأطباق</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-brand-sky/85">خطوات التوثيق</p>
+          <h3 className="mt-1 text-lg font-bold text-white sm:text-xl">توثيق الأطباق</h3>
+          <p className="mt-1 text-xs text-slate-400">
             إجمالي المسجّل:{" "}
-            <span className="font-semibold text-accent-green">{staffCount}</span>
+            <span className="font-semibold tabular-nums text-accent-green">{staffCount}</span>
           </p>
         </div>
-        <span className="inline-flex items-center gap-2 rounded-full border border-brand-sky/30 bg-brand-sky/10 px-3 py-1 text-xs font-medium text-brand-sky">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-brand-sky" />
+        <span className="inline-flex shrink-0 items-center gap-2 rounded-full border border-brand-sky/35 bg-brand-sky/10 px-3 py-1.5 text-xs font-semibold text-brand-sky shadow-[0_0_20px_-8px_rgba(56,189,248,0.5)]">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-sky/60 opacity-60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-sky" />
+          </span>
           مدعوم بالذكاء الاصطناعي
         </span>
       </div>
 
       <AIProgressSection selectedImage={selectedImage} detecting={detecting} />
 
-      <div className="space-y-5 p-5 sm:p-6">
+      <div className="space-y-6 p-5 sm:p-6 lg:p-7">
         {/* Hidden file input */}
         <input
           ref={dishFileInputRef}
@@ -71,12 +79,15 @@ export default function DishDocSection({
             type="button"
             disabled={saveLoading}
             onClick={onOpenCapture}
-            className="w-full overflow-hidden rounded-2xl bg-gradient-to-br from-brand to-brand-sky py-10 text-white shadow-xl shadow-brand/25 transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+            className="group relative w-full overflow-hidden rounded-2xl bg-gradient-to-br from-brand via-blue-600 to-brand-sky py-11 text-white shadow-xl shadow-brand/35 ring-1 ring-white/15 transition hover:shadow-[0_0_44px_-8px_rgba(56,189,248,0.55)] hover:brightness-[1.06] active:scale-[0.995] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <div className="flex flex-col items-center gap-3">
-              <span className="text-5xl leading-none" aria-hidden>📸</span>
+            <span className="pointer-events-none absolute inset-0 bg-[linear-gradient(120deg,transparent_30%,rgba(255,255,255,0.08)_50%,transparent_70%)] opacity-0 transition group-hover:opacity-100" />
+            <div className="relative flex flex-col items-center gap-3">
+              <span className="text-5xl leading-none drop-shadow-lg transition group-hover:scale-105" aria-hidden>
+                📸
+              </span>
               <span className="text-xl font-bold tracking-tight">التقاط صورة الطبق</span>
-              <span className="text-sm text-white/70">اضغط لفتح الكاميرا</span>
+              <span className="text-sm font-medium text-white/75">اضغط لفتح الكاميرا أو الرفع</span>
             </div>
           </button>
         ) : null}

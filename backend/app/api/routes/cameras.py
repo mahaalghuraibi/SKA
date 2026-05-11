@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.models.camera import Camera
 from app.models.user import User
 from app.schemas.camera import CameraCreate, CameraOut
+from app.security.stream_url import validate_camera_stream_url
 
 router = APIRouter(prefix="/cameras", tags=["cameras"])
 
@@ -30,7 +31,9 @@ def list_cameras(
     dependencies=[Depends(require_roles("admin", "supervisor"))],
 )
 def create_camera(payload: CameraCreate, db: Session = Depends(get_db)) -> Camera:
-    camera = Camera(**payload.model_dump())
+    data = payload.model_dump()
+    data["stream_url"] = validate_camera_stream_url(data.get("stream_url"))
+    camera = Camera(**data)
     db.add(camera)
     db.commit()
     db.refresh(camera)

@@ -1,12 +1,13 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.rbac import require_roles
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.db.session import get_db
 from app.models.camera import Camera
 from app.models.monitoring_alert import MonitoringAlert
@@ -52,7 +53,9 @@ def _has_recent_duplicate(
 
 
 @router.post("/analyze-frame", response_model=MonitoringAnalyzeResponse)
+@limiter.limit("72/minute")
 async def analyze_frame(
+    request: Request,
     image: UploadFile = File(...),
     camera_id: int | None = Form(None),
     camera_name: str | None = Form(None),
@@ -62,6 +65,12 @@ async def analyze_frame(
 ) -> MonitoringAnalyzeResponse:
     _ensure_supervisor_branch(current_user)
     image_bytes = await image.read()
+    max_b = int(getattr(settings, "MONITORING_UPLOAD_MAX_BYTES", 8 * 1024 * 1024) or 8 * 1024 * 1024)
+    if len(image_bytes) > max_b:
+        raise HTTPException(
+            status_code=413,
+            detail="حجم الملف يتجاوز الحد المسموح للتحليل.",
+        )
     try:
         payload = analyze_monitoring_frame(
             image_bytes=image_bytes,
@@ -71,17 +80,9 @@ async def analyze_frame(
         )
     except ValueError as exc:
         msg = str(exc)
-        if "يرجى إضافة مفتاح Gemini" in msg or "غير مفعل" in msg:
-            raise HTTPException(status_code=503, detail=msg) from exc
         if "الصورة غير صالحة" in msg:
             raise HTTPException(status_code=400, detail=msg) from exc
-        # Gemini / dependency failures are service configuration issues, not 500.
-        if (
-            "فشل تحليل الصورة" in msg
-            or "Gemini" in msg
-            or "تعذر تحميل مكتبات" in msg
-        ):
-            raise HTTPException(status_code=503, detail=msg) from exc
+        # YOLO / dependency / configuration failures → 503 with the Arabic detail.
         raise HTTPException(status_code=503, detail=msg) from exc
     except Exception:
         logger.exception("monitoring analyze unexpected error")
@@ -116,20 +117,30 @@ async def analyze_frame(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     snapshot = monitoring_image_snapshot(image_bytes)
     alerts_created = 0
-    cutoff = now - timedelta(seconds=30)
-    inserted_types: set[str] = set()
+    # Shorter window so successive snapshots / video frames can register distinct alerts without changing AI output.
+    cutoff = now - timedelta(seconds=14)
+    inserted_keys: set[tuple[str, int | None]] = set()
     persist_alerts = not settings.MONITORING_AI_DEMO_MODE and str(payload.get("provider") or "") != "demo"
 
     for v in (payload.get("violations") or []) if persist_alerts else []:
         if not isinstance(v, dict):
             continue
+        if v.get("alias_of"):
+            continue
         vtype = str(v.get("type", "")).strip()
         vconf = int(v.get("confidence", 0) or 0)
-        if not vtype or vconf < 85:
+        pin = v.get("person_index")
+        try:
+            pin_int = int(pin) if pin is not None else None
+        except (TypeError, ValueError):
+            pin_int = None
+        dedupe_key = (vtype, pin_int)
+        # Finalize_payload already applies per-type thresholds; this is only a hard junk floor (noise < ~37%).
+        if not vtype or vconf < 37:
             continue
-        if vtype in inserted_types:
+        if dedupe_key in inserted_keys:
             continue
-        inserted_types.add(vtype)
+        inserted_keys.add(dedupe_key)
         if _has_recent_duplicate(
             db,
             tenant_id=current_user.tenant_id,
@@ -172,7 +183,21 @@ async def analyze_frame(
         overall_confidence=int(payload.get("overall_confidence", 0) or 0),
         needs_review=bool(payload.get("needs_review")),
         checks=[MonitoringCheckOut(**c) for c in (payload.get("checks") or [])],
-        violations=[MonitoringViolationOut(**c) for c in (payload.get("violations") or [])],
+        violations=[
+            MonitoringViolationOut(
+                type=str(v.get("type", "")),
+                label_ar=str(v.get("label_ar", "")),
+                confidence=int(v.get("confidence", 0) or 0),
+                reason_ar=str(v.get("reason_ar", "")),
+                description=str(v.get("description", "") or v.get("reason_ar", "")),
+                status=str(v.get("status", "new") or "new"),
+                person_index=v.get("person_index"),
+                alias_of=v.get("alias_of"),
+            )
+            for v in (payload.get("violations") or [])
+            if isinstance(v, dict)
+        ],
         alerts_created=alerts_created,
         summary=str(payload.get("summary", "")),
+        frame_report=payload.get("frame_report"),
     )

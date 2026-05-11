@@ -26,7 +26,6 @@ def require_roles(*allowed: str) -> Callable:
     """Require one of `allowed` roles. `admin` always passes (full access)."""
 
     allowed_set = frozenset(allowed)
-    label = ", ".join(sorted(allowed_set))
 
     def dependency(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role == ROLE_ADMIN:

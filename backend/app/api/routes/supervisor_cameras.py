@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.models.camera import Camera
 from app.models.monitoring_alert import MonitoringAlert
 from app.models.user import User
+from app.security.stream_url import validate_camera_stream_url
 from app.schemas.supervisor_camera import (
     SupervisorAlertOut,
     SupervisorCameraCreate,
@@ -92,7 +93,7 @@ def create_supervisor_camera(
     cam = Camera(
         name=payload.name.strip(),
         location=payload.location.strip(),
-        stream_url=(payload.stream_url or "").strip() or None,
+        stream_url=validate_camera_stream_url(payload.stream_url),
         is_active=bool(payload.is_connected),
         ai_enabled=bool(payload.ai_enabled),
         tenant_id=current_user.tenant_id,
@@ -119,7 +120,7 @@ def update_supervisor_camera(
     if payload.location is not None:
         cam.location = payload.location.strip()
     if payload.stream_url is not None:
-        cam.stream_url = payload.stream_url.strip() or None
+        cam.stream_url = validate_camera_stream_url(payload.stream_url)
     if payload.is_connected is not None:
         cam.is_active = bool(payload.is_connected)
     if payload.ai_enabled is not None:

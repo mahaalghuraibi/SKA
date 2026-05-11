@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import AOS from "aos";
+import "aos/dist/aos.css";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS } from "../constants.js";
 import { dishSaveErrorMessage } from "../utils/apiError.js";
 import { formatConfidencePercentDisplay } from "../utils/confidence.js";
@@ -22,6 +24,66 @@ import RecordsList from "../components/dish/RecordsList.jsx";
 import EditRecordModal from "../components/dish/EditRecordModal.jsx";
 import StaffProfileCard from "../components/staff/StaffProfileCard.jsx";
 import CameraCaptureSection from "../components/camera/CameraCaptureSection.jsx";
+import RestaurantCameraCard from "../components/monitoring/RestaurantCameraCard.jsx";
+import LiveMonitoringZoneCards from "../components/monitoring/LiveMonitoringZoneCards.jsx";
+import SupervisorExecutiveHero from "../components/supervisor/SupervisorExecutiveHero.jsx";
+import SupervisorSummaryCards from "../components/supervisor/SupervisorSummaryCards.jsx";
+import SupervisorMonitoringOverview from "../components/supervisor/SupervisorMonitoringOverview.jsx";
+import SupervisorAnalyticsRecharts from "../components/supervisor/SupervisorAnalyticsRecharts.jsx";
+import ReportsAnalyticsCharts from "../components/supervisor/ReportsAnalyticsCharts.jsx";
+import StickyAnalyticsSummaryBar from "../components/supervisor/StickyAnalyticsSummaryBar.jsx";
+import ExpandMoreList from "../components/shared/ExpandMoreList.jsx";
+import { useExpandMoreList } from "../hooks/useExpandMoreList.js";
+import EmptyState from "../components/shared/EmptyState.jsx";
+import { PLATFORM_BRAND, dashboardTitleForRole } from "../constants/branding.js";
+import {
+  STAFF_SECTION_IDS,
+  SUPERVISOR_SECTION_IDS,
+  ROUTES,
+  staffPathFromSectionId,
+  supervisorPathFromSectionId,
+  getStaffSectionFromPathname,
+  getSupervisorSectionFromPathname,
+  isStaffDashboardPath,
+  isSupervisorDashboardPath,
+  legacyHashRedirectPath,
+  DASHBOARD_PAGE_TITLES,
+} from "../constants/appRoutes.js";
+import { SECTION_THEME } from "../constants/dashboardTheme.js";
+import {
+  canonicalViolationType as canonicalMonitoringViolationType,
+  getViolationLabel,
+  VIOLATION_CATEGORY_KEYS_ORDER,
+} from "../utils/violationLabels.js";
+import {
+  REPORT_PLATFORM_TAGLINE_AR,
+  REPORT_PLATFORM_TITLE_AR,
+  buildDishBranchPeriodRows,
+  dishReviewStatusArExport,
+  formatAlertBranchArea,
+  formatMonitoringConfidencePercent,
+  formatReportDateYmd,
+  formatReportPeriodLabel,
+  monitoringAlertStatusArExport,
+  monitoringSeverityLabelAr,
+  taeenReportFilename,
+  violationTypeLabelForReport,
+} from "../utils/reportExportHelpers.js";
+import {
+  MONITORING_ZONE_DEFINITIONS,
+  findCameraForZone,
+  alertsForZone,
+  todayIsoDateLocal,
+  isAlertToday,
+} from "../constants/monitoringZones.js";
+import {
+  RESTAURANT_CONNECTION_TYPES,
+  loadRestaurantCameraConfigs,
+  persistRestaurantCameraConfigs,
+  prepareSavePayload,
+  validateRestaurantCameraDraft,
+  mergeRestaurantCameraDefaults,
+} from "../lib/restaurantCameraStorage.js";
 
 /** Merge API `avatar_url` / `avatar_data_url` for UI + `<img src>`. */
 function normalizeStaffMeUser(body) {
@@ -119,13 +181,22 @@ function SkeletonPulse({ className = "" }) {
   );
 }
 
-function downloadUtf8Csv(filename, headerRow, rows) {
+function downloadUtf8Csv(filename, headerRow, rows, options = {}) {
+  const { preambleRows = [] } = options;
   const esc = (v) => {
     const s = v == null ? "" : String(v);
     if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
-  const lines = [headerRow.map(esc).join(","), ...rows.map((r) => r.map(esc).join(","))];
+  const preambleLines = preambleRows.map((r) =>
+    Array.isArray(r) ? r.map(esc).join(",") : esc(r),
+  );
+  const headerLine = Array.isArray(headerRow) && headerRow.length ? headerRow.map(esc).join(",") : null;
+  const lines = [
+    ...preambleLines,
+    ...(headerLine ? [headerLine] : []),
+    ...rows.map((r) => r.map(esc).join(",")),
+  ];
   const blob = new Blob([`\uFEFF${lines.join("\n")}`], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -244,46 +315,17 @@ function FoodImageThumb({ src, alt = "", sizeClass = "h-24 w-24" }) {
 }
 
 const glassCard =
-  "rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass backdrop-blur-xl transition duration-300 hover:border-white/15 hover:shadow-glass-lg sm:p-6";
+  "rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.82)] p-4 shadow-glass backdrop-blur-sm transition duration-200 hover:border-white/15 sm:p-6";
 
-/** Staff dashboard: in-page sections for anchor nav + scroll spy */
-const STAFF_SECTION_IDS = {
-  doc: "section-dish-doc",
-  search: "section-search-filter",
-  records: "section-dish-records",
-};
+/** Staff sections — minimal blur for scroll performance */
+const staffGlassCard =
+  "rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.85)] p-4 shadow-glass backdrop-blur-sm transition duration-200 hover:border-white/15 sm:p-6";
 
-const STAFF_HASH_TO_SECTION = {
-  [`#${STAFF_SECTION_IDS.doc}`]: STAFF_SECTION_IDS.doc,
-  [`#${STAFF_SECTION_IDS.search}`]: STAFF_SECTION_IDS.search,
-  "#section-dish-search": STAFF_SECTION_IDS.search,
-  [`#${STAFF_SECTION_IDS.records}`]: STAFF_SECTION_IDS.records,
-};
-
-const SUPERVISOR_SECTION_IDS = {
-  analytics: "analytics",
-  cameras: "cameras",
-  alerts: "alerts",
-  reviews: "dish-reviews",
-  reports: "reports",
-  employees: "employees",
-  settings: "settings",
-};
-
-const SUPERVISOR_HASH_TO_SECTION = {
-  "#analytics": SUPERVISOR_SECTION_IDS.analytics,
-  "#cameras": SUPERVISOR_SECTION_IDS.cameras,
-  "#alerts": SUPERVISOR_SECTION_IDS.alerts,
-  "#dish-reviews": SUPERVISOR_SECTION_IDS.reviews,
-  "#reports": SUPERVISOR_SECTION_IDS.reports,
-  "#employees": SUPERVISOR_SECTION_IDS.employees,
-  "#settings": SUPERVISOR_SECTION_IDS.settings,
-};
+/** Staff dish workflow — clearer depth + glow (scoped to staff sections only). */
+const staffElevatedCard =
+  `${staffGlassCard} border-white/12 shadow-[0_0_48px_-18px_rgba(56,189,248,0.16)] ring-1 ring-white/[0.05] hover:border-brand-sky/20`;
 
 const ADMIN_SETTINGS_STORAGE_KEY = "ska_admin_settings";
-const REVIEW_PAGE_SIZE = 8;
-const EMPLOYEE_PAGE_SIZE = 6;
-const ALERTS_PAGE_STEP = 8;
 const ADMIN_SETTINGS_DEFAULTS = {
   ai: {
     minConfidence: 70,
@@ -304,7 +346,7 @@ const ADMIN_SETTINGS_DEFAULTS = {
     excelEnabled: false,
   },
   system: {
-    platformName: "SKA Smart Kitchen Analytics",
+    platformName: "منصة تعيين الجودة",
     defaultLanguage: "العربية",
     timezone: "Asia/Riyadh",
   },
@@ -347,20 +389,6 @@ function normalizeAdminSettingsShape(input) {
       timezone: ADMIN_SETTINGS_DEFAULTS.system.timezone,
     },
   };
-}
-
-function staffSectionFromHash(hashValue) {
-  const h = String(hashValue || "").trim();
-  if (!h) return null;
-  const normalized = h.endsWith("/") ? h.slice(0, -1) : h;
-  return STAFF_HASH_TO_SECTION[normalized] || null;
-}
-
-function supervisorSectionFromHash(hashValue) {
-  const h = String(hashValue || "").trim();
-  if (!h) return null;
-  const normalized = h.endsWith("/") ? h.slice(0, -1) : h;
-  return SUPERVISOR_HASH_TO_SECTION[normalized] || null;
 }
 
 function isValidYmdDate(text) {
@@ -438,9 +466,15 @@ function displayAiConfidence(raw) {
 
 function monitoringCheckCardClass(status) {
   const s = String(status || "").toLowerCase();
-  if (s === "safe") return "border-emerald-500/40 bg-emerald-500/10";
-  if (s === "violation") return "border-red-500/45 bg-red-500/10";
-  if (s === "needs_review") return "border-amber-500/45 bg-amber-500/10";
+  if (s === "safe") {
+    return "border-2 border-emerald-500 bg-emerald-500/[0.18] shadow-[0_0_14px_rgba(16,185,129,0.18)]";
+  }
+  if (s === "violation") {
+    return "border-2 border-red-500 bg-red-500/[0.18] shadow-[0_0_14px_rgba(239,68,68,0.2)]";
+  }
+  if (s === "needs_review" || s === "uncertain") {
+    return "border-2 border-amber-400 bg-amber-500/[0.16] shadow-[0_0_12px_rgba(245,158,11,0.18)]";
+  }
   return "border-white/15 bg-[#0B1327]/70";
 }
 
@@ -455,26 +489,208 @@ function monitoringStatusLabelAr(status) {
 function monitoringAlertStatusAr(status) {
   const s = String(status || "").toLowerCase();
   if (s === "open") return "مفتوح";
-  if (s === "new") return "جديد";
+  if (s === "new") return "يحتاج مراجعة";
+  if (s === "needs_review") return "يحتاج مراجعة";
   if (s === "resolved") return "تمت المعالجة";
   return status || "—";
 }
 
-/** Stored `violation_type` from monitoring_alerts → category for admin reports */
-const VIOLATION_REPORT_CATEGORY_ORDER = [
-  { key: "no_mask", label: "الكمامة" },
-  { key: "no_gloves", label: "القفازات" },
-  { key: "no_headcover", label: "غطاء الرأس" },
-  { key: "trash_location", label: "الحاويات" },
-  { key: "wet_floor", label: "الأرضيات المبللة" },
-];
+/** PDF export — professional status colors without affecting live UI. */
+function monitoringAlertStatusPrintStyle(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "resolved") return { color: "#15803d", fontWeight: 600 };
+  if (s === "open") return { color: "#dc2626", fontWeight: 600 };
+  if (s === "new" || s === "needs_review") return { color: "#ea580c", fontWeight: 600 };
+  return { color: "#475569" };
+}
 
-function violationReportTypeLabel(violationType) {
-  const t = String(violationType || "").trim().toLowerCase();
-  const row = VIOLATION_REPORT_CATEGORY_ORDER.find((c) => c.key === t);
-  if (row) return row.label;
-  if (t === "no_uniform") return "الزي الموحّد";
-  return null;
+function monitoringSeverityPrintStyle(confidence) {
+  const n = Number(confidence);
+  if (!Number.isFinite(n)) return { color: "#64748b" };
+  if (n >= 85) return { color: "#dc2626", fontWeight: 600 };
+  if (n >= 55) return { color: "#ea580c", fontWeight: 600 };
+  return { color: "#15803d", fontWeight: 600 };
+}
+
+/** Dish review PDF — green / orange / red / gray per spec. */
+function dishReviewStatusPrintStyle(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "approved") return { color: "#15803d", fontWeight: 600 };
+  if (s === "rejected") return { color: "#dc2626", fontWeight: 600 };
+  if (s === "pending_review" || s === "needs_review") return { color: "#ea580c", fontWeight: 600 };
+  return { color: "#64748b", fontWeight: 600 };
+}
+
+function dishReviewArabicStatusPrintStyle(labelAr) {
+  const s = String(labelAr || "").trim();
+  if (s === "معتمد") return { color: "#15803d", fontWeight: 600 };
+  if (s === "مرفوض") return { color: "#dc2626", fontWeight: 600 };
+  if (s === "يحتاج مراجعة") return { color: "#ea580c", fontWeight: 600 };
+  return { color: "#64748b", fontWeight: 600 };
+}
+
+/** Workflow styling — مفتوح (أحمر)، يحتاج مراجعة (برتقالي)، تمت المعالجة (أخضر). */
+function alertWorkflowCardRing(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "resolved") return "border-emerald-500/35 shadow-[0_0_32px_-16px_rgba(52,211,153,0.35)]";
+  if (s === "new") return "border-amber-500/38 shadow-[0_0_32px_-16px_rgba(251,191,36,0.28)]";
+  if (s === "open") return "border-red-500/38 shadow-[0_0_32px_-16px_rgba(248,113,113,0.28)]";
+  return "border-white/10 shadow-[0_12px_40px_-28px_rgba(0,0,0,0.85)]";
+}
+
+function alertWorkflowBadgeClass(status) {
+  const s = String(status || "").toLowerCase();
+  if (s === "resolved") return "border-emerald-500/45 bg-emerald-500/12 text-emerald-100";
+  if (s === "new") return "border-amber-500/45 bg-amber-500/12 text-amber-100";
+  if (s === "open") return "border-red-500/45 bg-red-500/12 text-red-100";
+  return "border-white/15 bg-white/5 text-slate-300";
+}
+
+/** Stored `violation_type` from monitoring_alerts → UI taxonomy (kitchen monitoring catalog only) */
+const ALLOWED_MONITORING_VIOLATION_KEYS = new Set([
+  "no_mask",
+  "no_gloves",
+  "no_headcover",
+  "improper_uniform",
+  "improper_trash_location",
+  "wet_floor",
+]);
+
+const VIOLATION_REPORT_CATEGORY_ORDER = VIOLATION_CATEGORY_KEYS_ORDER.map((key) => ({
+  key,
+  label: getViolationLabel(key),
+}));
+
+const MONITORING_RISK_META = {
+  high: { label: "مرتفع", chip: "border-red-500/35 bg-red-500/15 text-red-200" },
+  medium: { label: "متوسط", chip: "border-amber-500/35 bg-amber-500/15 text-amber-200" },
+  low: { label: "منخفض", chip: "border-emerald-500/35 bg-emerald-500/15 text-emerald-200" },
+};
+
+/** Merge repeated violations across consecutive nearby video frames (same type + same worker). */
+/** Downscale JPEG from live &lt;video&gt; for bandwidth + UI responsiveness */
+function captureLiveMonitoringBlob(videoEl, maxLongEdge = 960, jpegQuality = 0.72) {
+  return new Promise((resolve) => {
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    if (!vw || !vh || vw < 2 || vh < 2) {
+      resolve(null);
+      return;
+    }
+    let tw = vw;
+    let th = vh;
+    const long = Math.max(vw, vh);
+    if (long > maxLongEdge) {
+      const scale = maxLongEdge / long;
+      tw = Math.round(vw * scale);
+      th = Math.round(vh * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = tw;
+    canvas.height = th;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      resolve(null);
+      return;
+    }
+    ctx.drawImage(videoEl, 0, 0, tw, th);
+    canvas.toBlob((blob) => resolve(blob || null), "image/jpeg", jpegQuality);
+  });
+}
+
+function liveRiskToTier(riskLevel, violations) {
+  const r = String(riskLevel || "").toLowerCase();
+  const n = Array.isArray(violations) ? violations.length : 0;
+  if (r === "high") return "red";
+  if (r === "medium") return "yellow";
+  if (n > 0) return "yellow";
+  return "green";
+}
+
+function summarizeLiveViolations(violations) {
+  if (!Array.isArray(violations) || violations.length === 0) return "لا توجد";
+  const labels = [];
+  for (const v of violations) {
+    const k = canonicalMonitoringViolationType(v?.type || v?.violation_type);
+    if (!k || !ALLOWED_MONITORING_VIOLATION_KEYS.has(k)) continue;
+    const row = VIOLATION_REPORT_CATEGORY_ORDER.find((c) => c.key === k);
+    labels.push(row?.label || k);
+  }
+  const uniq = [...new Set(labels)];
+  if (uniq.length === 0) return "لا توجد";
+  return uniq.slice(0, 5).join("، ");
+}
+
+function mergeNearbyMonitoringViolations(flatList, gapSec = 0.9) {
+  const sorted = [...flatList].sort((a, b) => a.atSecond - b.atSecond);
+  const out = [];
+  for (const v of sorted) {
+    const last = out[out.length - 1];
+    const pk = `${v.typeKey}|${v.personIndex != null ? String(v.personIndex) : ""}`;
+    const lk = last
+      ? `${last.typeKey}|${last.personIndex != null ? String(last.personIndex) : ""}`
+      : "";
+    if (last && pk === lk && v.atSecond - last.atSecond <= gapSec) {
+      const useNew = Number(v.confidence) >= Number(last.confidence);
+      out[out.length - 1] = useNew
+        ? { ...v, mergedFrames: (last.mergedFrames || 1) + 1 }
+        : { ...last, mergedFrames: (last.mergedFrames || 1) + 1 };
+    } else {
+      out.push({ ...v, mergedFrames: 1 });
+    }
+  }
+  return out;
+}
+
+function alertSeverityBadgeMeta(confidence) {
+  const n = Number(confidence);
+  if (!Number.isFinite(n)) {
+    return { label: "خطورة غير محددة", cls: "border-slate-500/40 bg-slate-800/60 text-slate-300" };
+  }
+  if (n >= 85) return { label: "خطورة عالية", cls: "border-red-500/45 bg-red-500/15 text-red-100" };
+  if (n >= 55) return { label: "تحذير", cls: "border-amber-500/45 bg-amber-500/15 text-amber-100" };
+  return { label: "منخفض", cls: "border-emerald-500/45 bg-emerald-500/15 text-emerald-100" };
+}
+
+function monitoringViolationChipMeta(typeOrKey) {
+  const canon = canonicalMonitoringViolationType(typeOrKey);
+  const ar = () => getViolationLabel(canon || typeOrKey);
+  if (canon === "no_gloves") {
+    return { label: `🔴 ${ar()}`, cls: "border-red-500/35 bg-red-500/15 text-red-200" };
+  }
+  if (canon === "no_mask") {
+    return { label: `🟠 ${ar()}`, cls: "border-orange-500/35 bg-orange-500/15 text-orange-200" };
+  }
+  if (canon === "no_headcover") {
+    return { label: `🟠 ${ar()}`, cls: "border-amber-500/35 bg-amber-500/15 text-amber-200" };
+  }
+  if (canon === "improper_uniform" || canon === "no_uniform") {
+    return { label: `🟠 ${ar()}`, cls: "border-yellow-500/35 bg-yellow-500/15 text-yellow-200" };
+  }
+  if (canon === "wet_floor") {
+    return { label: `🔴 ${ar()}`, cls: "border-red-500/35 bg-red-500/15 text-red-200" };
+  }
+  if (canon === "improper_trash_location" || canon === "trash_floor" || canon === "waste_area") {
+    return { label: `🟠 ${ar()}`, cls: "border-orange-500/35 bg-orange-500/15 text-orange-200" };
+  }
+  return { label: ar(), cls: "border-white/20 bg-white/5 text-slate-200" };
+}
+
+function monitoringViolationOrderIndex(typeOrKey) {
+  const canon = canonicalMonitoringViolationType(typeOrKey);
+  const idx = VIOLATION_REPORT_CATEGORY_ORDER.findIndex((c) => c.key === canon);
+  return idx >= 0 ? idx : 999;
+}
+
+function sortMonitoringViolationsReadable(list) {
+  const arr = Array.isArray(list) ? [...list] : [];
+  arr.sort((a, b) => {
+    const ai = monitoringViolationOrderIndex(a?.typeKey || a?.type);
+    const bi = monitoringViolationOrderIndex(b?.typeKey || b?.type);
+    if (ai !== bi) return ai - bi;
+    return Number(b?.confidence || 0) - Number(a?.confidence || 0);
+  });
+  return arr;
 }
 
 function computeViolationsReportStats(alerts) {
@@ -486,12 +702,14 @@ function computeViolationsReportStats(alerts) {
   let resolvedCount = 0;
   for (const a of list) {
     const raw = String(a.type || "").trim().toLowerCase();
+    const canon = canonicalMonitoringViolationType(raw);
     if (raw) {
-      byRawType.set(raw, (byRawType.get(raw) || 0) + 1);
+      const aggKey = VIOLATION_CATEGORY_KEYS_ORDER.includes(canon) ? canon : raw;
+      byRawType.set(aggKey, (byRawType.get(aggKey) || 0) + 1);
     }
-    const known = VIOLATION_REPORT_CATEGORY_ORDER.some((c) => c.key === raw);
+    const known = canon && VIOLATION_CATEGORY_KEYS_ORDER.includes(canon);
     if (known) {
-      typeCounts[raw] += 1;
+      typeCounts[canon] += 1;
     } else if (raw) {
       typeCounts._other += 1;
     }
@@ -509,10 +727,8 @@ function computeViolationsReportStats(alerts) {
   }
   let topLabel = "—";
   if (topN > 0 && topRaw) {
-    topLabel =
-      violationReportTypeLabel(topRaw) ||
-      list.find((x) => String(x.type || "").trim().toLowerCase() === topRaw)?.label_ar ||
-      topRaw;
+    const match = list.find((x) => String(x.type || "").trim().toLowerCase() === topRaw);
+    topLabel = match?.label_ar?.trim() || getViolationLabel(topRaw);
   }
   const sortedLatest = [...list].sort(
     (x, y) => new Date(y.created_at || 0).getTime() - new Date(x.created_at || 0).getTime(),
@@ -551,8 +767,8 @@ function formatVideoDuration(seconds) {
 function makeVideoFrameTimes(durationSec, sampleCount = 12) {
   const d = Number(durationSec);
   if (!Number.isFinite(d) || d <= 0) return [];
-  const minSamples = d < 20 ? 10 : 8;
-  const targetCount = Math.max(minSamples, Math.min(22, Math.floor(sampleCount)));
+  const minSamples = d < 20 ? 16 : 12;
+  const targetCount = Math.max(minSamples, Math.min(36, Math.floor(sampleCount)));
   const epsilon = Math.max(0.06, Math.min(0.35, d / 12));
   const start = Math.max(0, epsilon);
   const end = Math.max(start, d - epsilon);
@@ -615,6 +831,7 @@ function toStaffRecord(item, meta = {}) {
 
 export default function Dashboard() {
   const location = useLocation();
+  const navigate = useNavigate();
   const committedBlobUrlsRef = useRef(new Set());
   const dishFileInputRef = useRef(null);
   const cameraVideoRef = useRef(null);
@@ -622,8 +839,16 @@ export default function Dashboard() {
   const staffDocSectionRef = useRef(null);
   const staffSearchSectionRef = useRef(null);
   const staffRecordsSectionRef = useRef(null);
+  const staffSpyNavigateTimerRef = useRef(null);
+  const staffSpyRafRef = useRef(null);
+  const supervisorSpyNavigateTimerRef = useRef(null);
+  const supervisorSpyRafRef = useRef(null);
+  /** When true, next pathname sync must not call scrollIntoView (coming from scroll-spy navigate). */
+  const suppressScrollIntoViewFromSpyRef = useRef(false);
   const supervisorAnalyticsRef = useRef(null);
   const supervisorCamerasRef = useRef(null);
+  /** Scroll target: supervisor «مراقبة بالذكاء الاصطناعي» block (video/image upload). */
+  const supervisorMonitoringAiRef = useRef(null);
   const supervisorAlertsRef = useRef(null);
   const supervisorReviewsRef = useRef(null);
   const supervisorReportsRef = useRef(null);
@@ -687,8 +912,6 @@ export default function Dashboard() {
   const [editApproveTarget, setEditApproveTarget] = useState(null);
   const [editApproveForm, setEditApproveForm] = useState({ dishName: "", quantity: 1, source: "", notes: "" });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [activeStaffSection, setActiveStaffSection] = useState(STAFF_SECTION_IDS.doc);
-  const [activeSection, setActiveSection] = useState(SUPERVISOR_SECTION_IDS.analytics);
   const [staffMe, setStaffMe] = useState(null);
   const [staffProfileLoading, setStaffProfileLoading] = useState(false);
   const [cameraCards, setCameraCards] = useState([]);
@@ -708,20 +931,41 @@ export default function Dashboard() {
   const [monitoringVideoProgressText, setMonitoringVideoProgressText] = useState("");
   const [monitoringVideoResults, setMonitoringVideoResults] = useState([]);
   const [monitoringVideoFrameResults, setMonitoringVideoFrameResults] = useState([]);
-  const [monitoringVideoAnalyzedTimes, setMonitoringVideoAnalyzedTimes] = useState([]);
-  const [monitoringVideoRawViolationCount, setMonitoringVideoRawViolationCount] = useState(0);
   const [monitoringVideoAlertsCreated, setMonitoringVideoAlertsCreated] = useState(0);
+  const [monitoringFrameFilter, setMonitoringFrameFilter] = useState("all");
   const [newCameraForm, setNewCameraForm] = useState({ name: "", location: "", stream_url: "" });
   const [monitoringAnalysisResult, setMonitoringAnalysisResult] = useState(null);
   const [monitoringAnalyzeLoading, setMonitoringAnalyzeLoading] = useState(false);
   const [monitoringLastAnalyzedAt, setMonitoringLastAnalyzedAt] = useState(null);
   const [monitoringCameraSelectId, setMonitoringCameraSelectId] = useState("");
   const [monitoringResolveLoadingId, setMonitoringResolveLoadingId] = useState(null);
+  /** Monitoring zone for analyze-frame payload (Arabic labels sent as location / camera_name). */
+  const [selectedMonitoringZoneId, setSelectedMonitoringZoneId] = useState(MONITORING_ZONE_DEFINITIONS[0]?.id || "kitchen");
+  const monitoringLiveVideoRef = useRef(null);
+  const monitoringWebcamStreamRef = useRef(null);
+  const livePrevKitchenRef = useRef(null);
+  const livePrevStorageRef = useRef(null);
+  const livePrevPrepRef = useRef(null);
+  const liveAnalysisIntervalRef = useRef(null);
+  const liveAnalysisInFlightRef = useRef(false);
+  const liveGenRef = useRef(0);
+  const liveAlertsThrottleRef = useRef(0);
+  const selectedMonitoringZoneIdRef = useRef(selectedMonitoringZoneId);
+  const [monitoringWebcamOn, setMonitoringWebcamOn] = useState(false);
+  const [monitoringWebcamBusy, setMonitoringWebcamBusy] = useState(false);
+  const [monitoringWebcamError, setMonitoringWebcamError] = useState("");
+  /** Periodic analyze-frame while webcam is on (1 Hz); independent of image/video upload modes */
+  const [monitoringLiveAutoOn, setMonitoringLiveAutoOn] = useState(false);
+  const [liveTickBusy, setLiveTickBusy] = useState(false);
+  /** Per-zone snapshot from last live tick for that zone (device preview shared until RTSP per slot) */
+  const [liveSlotStates, setLiveSlotStates] = useState({});
+  /** Per-zone IP / RTSP / webcam connection UI (localStorage until backend CRUD exists). */
+  const [restaurantCamConfigs, setRestaurantCamConfigs] = useState(() =>
+    loadRestaurantCameraConfigs(MONITORING_ZONE_DEFINITIONS),
+  );
+  const [cameraSetupBusy, setCameraSetupBusy] = useState({ test: null, save: null });
   const [adminSettings, setAdminSettings] = useState(ADMIN_SETTINGS_DEFAULTS);
   const [adminSettingsSaving, setAdminSettingsSaving] = useState(false);
-  const [alertsVisibleCount, setAlertsVisibleCount] = useState(ALERTS_PAGE_STEP);
-  const [reviewPage, setReviewPage] = useState(1);
-  const [employeePage, setEmployeePage] = useState(1);
   const [violationsReportFrom, setViolationsReportFrom] = useState("");
   const [violationsReportTo, setViolationsReportTo] = useState("");
   const [violationsReportRows, setViolationsReportRows] = useState([]);
@@ -832,8 +1076,8 @@ export default function Dashboard() {
       if (!raw) return;
       const parsed = JSON.parse(raw);
       setAdminSettings(normalizeAdminSettingsShape(parsed));
-    } catch (e) {
-      console.warn("[ska] failed to read admin settings from localStorage", e);
+    } catch {
+      /* ignore corrupt admin settings cache */
     }
   }, []);
 
@@ -852,10 +1096,64 @@ export default function Dashboard() {
     return () => mq.removeEventListener("change", closeNav);
   }, [getAccessToken]);
 
+  /** Role ↔ URL guards (BrowserRouter paths only — no hash routing). */
+  useEffect(() => {
+    if (!role) return undefined;
+    if (role === "staff" && isSupervisorDashboardPath(location.pathname)) {
+      navigate(ROUTES.dashboard, { replace: true });
+      return undefined;
+    }
+    if ((role === "supervisor" || role === "admin") && isStaffDashboardPath(location.pathname)) {
+      navigate(ROUTES.analytics, { replace: true });
+      return undefined;
+    }
+    return undefined;
+  }, [role, location.pathname, navigate]);
+
+  /** Migrate legacy bookmarked #sections to clean URLs once. */
+  useEffect(() => {
+    if (!role) return undefined;
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    if (!hash) return undefined;
+    const target = legacyHashRedirectPath(hash, role);
+    if (!target) return undefined;
+    navigate(target, { replace: true });
+    return undefined;
+  }, [role, navigate]);
+
+  /** Supervisor/admin: pathname drives active section + scroll into view (not when URL synced from scroll-spy). */
+  useEffect(() => {
+    if (!(role === "supervisor" || role === "admin")) return undefined;
+    const sec = getSupervisorSectionFromPathname(location.pathname);
+    if (!sec) return undefined;
+    if (suppressScrollIntoViewFromSpyRef.current) {
+      suppressScrollIntoViewFromSpyRef.current = false;
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      document.getElementById(sec)?.scrollIntoView({ behavior: "auto", block: "nearest" });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [location.pathname, role]);
+
+  /** Staff: pathname drives dish workflow section + scroll into view (not when URL synced from scroll-spy). */
   useEffect(() => {
     if (role !== "staff") return undefined;
-    const fromHash = staffSectionFromHash(window.location.hash);
-    if (fromHash) setActiveStaffSection(fromHash);
+    const sec = getStaffSectionFromPathname(location.pathname);
+    if (!sec) return undefined;
+    if (suppressScrollIntoViewFromSpyRef.current) {
+      suppressScrollIntoViewFromSpyRef.current = false;
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      document.getElementById(sec)?.scrollIntoView({ behavior: "auto", block: "nearest" });
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [location.pathname, role]);
+
+  /** Scroll spy: sync URL when the dominant section changes (replaceState → pathname). */
+  useEffect(() => {
+    if (role !== "staff") return undefined;
     const nodes = [
       document.getElementById(STAFF_SECTION_IDS.doc),
       document.getElementById(STAFF_SECTION_IDS.search),
@@ -865,96 +1163,164 @@ export default function Dashboard() {
 
     const observer = new IntersectionObserver(
       () => {
-        let bestId = null;
-        let bestDist = Number.POSITIVE_INFINITY;
-        for (const el of nodes) {
-          const top = el.getBoundingClientRect().top;
-          const dist = Math.abs(top - 120);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestId = el.id;
+        if (staffSpyRafRef.current != null) return;
+        staffSpyRafRef.current = requestAnimationFrame(() => {
+          staffSpyRafRef.current = null;
+          let bestId = null;
+          let bestDist = Number.POSITIVE_INFINITY;
+          for (const el of nodes) {
+            const top = el.getBoundingClientRect().top;
+            const dist = Math.abs(top - 120);
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestId = el.id;
+            }
           }
-        }
-        if (bestId) {
-          setActiveStaffSection(bestId);
-          const wantedHash = `#${bestId}`;
-          if (window.location.hash !== wantedHash) {
-            window.history.replaceState(null, "", wantedHash);
+          if (!bestId) return;
+          const nextPath = staffPathFromSectionId(bestId);
+          if (typeof window !== "undefined" && window.location.pathname !== nextPath) {
+            if (staffSpyNavigateTimerRef.current) window.clearTimeout(staffSpyNavigateTimerRef.current);
+            staffSpyNavigateTimerRef.current = window.setTimeout(() => {
+              staffSpyNavigateTimerRef.current = null;
+              if (typeof window !== "undefined" && window.location.pathname !== nextPath) {
+                suppressScrollIntoViewFromSpyRef.current = true;
+                navigate(nextPath, { replace: true });
+              }
+            }, 120);
           }
-        }
+        });
       },
       { root: null, rootMargin: "-20% 0px -60% 0px", threshold: [0, 0.1, 0.25, 0.5] },
     );
     nodes.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [getAccessToken, handleProtectedAuthFailure, role]);
-
-  useEffect(() => {
-    if (!(role === "supervisor" || role === "admin")) return undefined;
-    const fromHash = supervisorSectionFromHash(window.location.hash);
-    if (fromHash) {
-      setActiveSection(fromHash);
-    } else {
-      setActiveSection(SUPERVISOR_SECTION_IDS.analytics);
-      if (!window.location.hash) {
-        window.history.replaceState(null, "", "#analytics");
+    return () => {
+      observer.disconnect();
+      if (staffSpyRafRef.current != null) {
+        cancelAnimationFrame(staffSpyRafRef.current);
+        staffSpyRafRef.current = null;
       }
-    }
-    const nodes = [
-      supervisorAnalyticsRef.current,
-      supervisorCamerasRef.current,
-      supervisorAlertsRef.current,
-      supervisorReviewsRef.current,
-      supervisorReportsRef.current,
-      supervisorEmployeesRef.current,
-      supervisorSettingsRef.current,
-    ].filter(Boolean);
-    if (nodes.length === 0) return undefined;
-    const observer = new IntersectionObserver(
-      () => {
-        let bestId = null;
-        let bestDist = Number.POSITIVE_INFINITY;
-        for (const el of nodes) {
-          const top = el.getBoundingClientRect().top;
-          const dist = Math.abs(top - 120);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestId = el.id;
-          }
-        }
-        if (bestId) {
-          setActiveSection(bestId);
-          const wantedHash = `#${bestId}`;
-          if (window.location.hash !== wantedHash) window.history.replaceState(null, "", wantedHash);
-        }
-      },
-      { root: null, rootMargin: "-20% 0px -60% 0px", threshold: [0, 0.1, 0.25, 0.5] },
-    );
-    nodes.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [getAccessToken, handleProtectedAuthFailure, role]);
+      if (staffSpyNavigateTimerRef.current) {
+        window.clearTimeout(staffSpyNavigateTimerRef.current);
+        staffSpyNavigateTimerRef.current = null;
+      }
+    };
+  }, [role, navigate]);
 
   useEffect(() => {
     if (!(role === "supervisor" || role === "admin")) return undefined;
-    const syncFromHash = () => {
-      const fromHash = supervisorSectionFromHash(window.location.hash);
-      if (fromHash) setActiveSection(fromHash);
-    };
-    syncFromHash();
-    window.addEventListener("hashchange", syncFromHash);
-    return () => window.removeEventListener("hashchange", syncFromHash);
-  }, [role]);
+    let cancelled = false;
+    let observer = null;
+    let attachRaf = null;
+    let attempts = 0;
 
-  useEffect(() => {
-    if (role !== "staff") return undefined;
-    const syncFromHash = () => {
-      const fromHash = staffSectionFromHash(window.location.hash);
-      if (fromHash) setActiveStaffSection(fromHash);
+    const buildNodes = () =>
+      [
+        supervisorAnalyticsRef.current,
+        supervisorCamerasRef.current,
+        supervisorAlertsRef.current,
+        supervisorReviewsRef.current,
+        supervisorReportsRef.current,
+        supervisorEmployeesRef.current,
+        supervisorSettingsRef.current,
+      ].filter(Boolean);
+
+    const attach = () => {
+      const nodes = buildNodes();
+      if (nodes.length === 0) return false;
+      observer = new IntersectionObserver(
+        () => {
+          if (supervisorSpyRafRef.current != null) return;
+          supervisorSpyRafRef.current = requestAnimationFrame(() => {
+            supervisorSpyRafRef.current = null;
+            const liveNodes = buildNodes();
+            if (liveNodes.length === 0) return;
+            let bestId = null;
+            let bestDist = Number.POSITIVE_INFINITY;
+            for (const el of liveNodes) {
+              const top = el.getBoundingClientRect().top;
+              const dist = Math.abs(top - 120);
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestId = el.id;
+              }
+            }
+            if (!bestId) return;
+            const cur = typeof window !== "undefined" ? window.location.pathname : "";
+            if (
+              bestId === SUPERVISOR_SECTION_IDS.employees &&
+              cur.startsWith(`${ROUTES.employees}/`)
+            ) {
+              return;
+            }
+            if (bestId === SUPERVISOR_SECTION_IDS.alerts && cur.startsWith(`${ROUTES.alerts}/`)) {
+              return;
+            }
+            if (bestId === SUPERVISOR_SECTION_IDS.cameras && cur.startsWith(`${ROUTES.cameras}/`)) {
+              return;
+            }
+            if (bestId === SUPERVISOR_SECTION_IDS.reports && cur.startsWith(`${ROUTES.reports}/`)) {
+              return;
+            }
+            const nextPath = supervisorPathFromSectionId(bestId);
+            if (typeof window !== "undefined" && window.location.pathname !== nextPath) {
+              if (supervisorSpyNavigateTimerRef.current) window.clearTimeout(supervisorSpyNavigateTimerRef.current);
+              supervisorSpyNavigateTimerRef.current = window.setTimeout(() => {
+                supervisorSpyNavigateTimerRef.current = null;
+                if (typeof window !== "undefined" && window.location.pathname !== nextPath) {
+                  suppressScrollIntoViewFromSpyRef.current = true;
+                  navigate(nextPath, { replace: true });
+                }
+              }, 120);
+            }
+          });
+        },
+        { root: null, rootMargin: "-20% 0px -60% 0px", threshold: [0, 0.1, 0.25, 0.5] },
+      );
+      nodes.forEach((el) => observer.observe(el));
+      return true;
     };
-    syncFromHash();
-    window.addEventListener("hashchange", syncFromHash);
-    return () => window.removeEventListener("hashchange", syncFromHash);
-  }, [role]);
+
+    const tryAttach = () => {
+      if (cancelled) return;
+      if (attach()) return;
+      attempts += 1;
+      if (attempts > 40) return;
+      attachRaf = requestAnimationFrame(tryAttach);
+    };
+
+    tryAttach();
+
+    return () => {
+      cancelled = true;
+      if (attachRaf != null) cancelAnimationFrame(attachRaf);
+      observer?.disconnect();
+      if (supervisorSpyRafRef.current != null) {
+        cancelAnimationFrame(supervisorSpyRafRef.current);
+        supervisorSpyRafRef.current = null;
+      }
+      if (supervisorSpyNavigateTimerRef.current) {
+        window.clearTimeout(supervisorSpyNavigateTimerRef.current);
+        supervisorSpyNavigateTimerRef.current = null;
+      }
+    };
+  }, [role, navigate]);
+
+  /** Browser tab title — SaaS-style Arabic titles. */
+  useEffect(() => {
+    if (role === "staff") {
+      const sec = getStaffSectionFromPathname(location.pathname);
+      const titles = DASHBOARD_PAGE_TITLES.staff;
+      document.title = sec ? titles[sec] || titles.default : titles.default;
+      return;
+    }
+    if (role === "supervisor" || role === "admin") {
+      const sec = getSupervisorSectionFromPathname(location.pathname);
+      const titles = DASHBOARD_PAGE_TITLES.supervisor;
+      document.title = sec ? titles[sec] || titles.default : titles.default;
+      return;
+    }
+    document.title = PLATFORM_BRAND.documentTitle;
+  }, [role, location.pathname]);
 
   const loadCurrentStaffUser = useCallback(async () => {
     const token = getAccessToken();
@@ -970,22 +1336,13 @@ export default function Dashboard() {
         const email = body?.email != null ? String(body.email).trim() : "";
         if (res.ok && email) {
           const normalized = normalizeStaffMeUser(body);
-          console.log("[ska] currentUser loaded", {
-            url,
-            email: normalized.email,
-            full_name: normalized.full_name ?? null,
-            id: normalized.id,
-          });
           setStaffMe(normalized);
           return normalized;
         }
-        console.warn("[ska] currentUser fetch not ok", { url, status: res.status, detail: body?.detail });
       }
       setStaffMe(null);
-      console.warn("[ska] currentUser: all profile endpoints failed", { tried: CURRENT_USER_ME_URLS });
       return null;
-    } catch (e) {
-      console.warn("[ska] currentUser fetch error", e);
+    } catch {
       setStaffMe(null);
       return null;
     } finally {
@@ -1052,6 +1409,34 @@ export default function Dashboard() {
     ],
   );
 
+  useEffect(() => {
+    AOS.init({
+      duration: 700,
+      easing: "ease-out-cubic",
+      once: true,
+      offset: 44,
+      anchorPlacement: "top-bottom",
+      disable: () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    });
+    const id = requestAnimationFrame(() => {
+      AOS.refresh();
+    });
+    let resizeDebounce = null;
+    const onResize = () => {
+      if (resizeDebounce != null) window.clearTimeout(resizeDebounce);
+      resizeDebounce = window.setTimeout(() => {
+        resizeDebounce = null;
+        AOS.refresh();
+      }, 250);
+    };
+    window.addEventListener("resize", onResize, { passive: true });
+    return () => {
+      cancelAnimationFrame(id);
+      if (resizeDebounce != null) window.clearTimeout(resizeDebounce);
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
+
   function resetAllFilters() {
     setFilterSearch("");
     setFilterDishType("");
@@ -1064,39 +1449,62 @@ export default function Dashboard() {
     setSortKey("newest");
   }
 
-  const dashboardTitle = useMemo(() => {
-    if (role === "staff") return "لوحة توثيق الأطباق";
-    if (role === "supervisor") return "لوحة مراقبة الجودة والتنبيهات";
-    return "لوحة إدارة النظام";
-  }, [role]);
+  const dashboardTitle = useMemo(() => dashboardTitleForRole(role), [role]);
+
+  const unresolvedAlertsCount = useMemo(
+    () => alertsList.filter((a) => String(a?.status || "").toLowerCase() !== "resolved").length,
+    [alertsList],
+  );
+
+  const executiveBranchLabel = supervisorSummary?.branch_name?.trim() || PLATFORM_BRAND.nameShortAr;
+  const executiveLiveLabel =
+    monitoringWebcamOn && monitoringLiveAutoOn
+      ? "نشط — تحليل دوري"
+      : monitoringWebcamOn
+        ? "معاينة كاميرا الجهاز"
+        : "غير نشط";
+  const executiveQualityLabel = supervisorSummaryLoading
+    ? "…"
+    : supervisorSummary?.quality_score != null
+      ? `${Math.round(Number(supervisorSummary.quality_score))}%`
+      : supervisorSummary?.compliance_rate != null
+        ? `${Math.round(Number(supervisorSummary.compliance_rate))}%`
+        : "—";
+
+  const monitoringHealthLine = alertsLoading
+    ? "جاري التحقق…"
+    : alertsError
+      ? "تعذر التحقق من التنبيهات"
+      : "الاتصال بالخادم سليم";
+  const monitoringLiveLine =
+    monitoringWebcamOn && monitoringLiveAutoOn ? "تحليل لقطات نشط" : "بدون تحليل تلقائي فوري";
 
   const navLinks = useMemo(() => {
     if (role === "staff") {
       return [
-        { href: `#${STAFF_SECTION_IDS.doc}`, label: "توثيق الأطباق", emoji: "📸", sectionId: STAFF_SECTION_IDS.doc },
-        { href: `#${STAFF_SECTION_IDS.search}`, label: "البحث والتصفية", emoji: "🔎", sectionId: STAFF_SECTION_IDS.search },
-        { href: `#${STAFF_SECTION_IDS.records}`, label: "سجل الأطباق", emoji: "📋", sectionId: STAFF_SECTION_IDS.records },
+        { to: ROUTES.dashboard, label: "توثيق الأطباق", emoji: "📸", sectionId: STAFF_SECTION_IDS.doc },
+        { to: ROUTES.dashboardSearch, label: "البحث والتصفية", emoji: "🔎", sectionId: STAFF_SECTION_IDS.search },
+        { to: ROUTES.dashboardRecords, label: "سجل الأطباق", emoji: "📋", sectionId: STAFF_SECTION_IDS.records },
       ];
     }
     if (role === "supervisor") {
       return [
-        { href: "#analytics", label: "التحليلات", sectionId: SUPERVISOR_SECTION_IDS.analytics },
-        { href: "#alerts", label: "التنبيهات", sectionId: SUPERVISOR_SECTION_IDS.alerts },
-        { href: "#cameras", label: "الكاميرات", sectionId: SUPERVISOR_SECTION_IDS.cameras },
-        { href: "#reports", label: "التقارير", sectionId: SUPERVISOR_SECTION_IDS.reports },
-        { href: "#dish-reviews", label: "مراجعة الأطباق", sectionId: SUPERVISOR_SECTION_IDS.reviews },
-        { href: "#employees", label: "الموظفين", sectionId: SUPERVISOR_SECTION_IDS.employees },
-        { href: "#settings", label: "الإعدادات", sectionId: SUPERVISOR_SECTION_IDS.settings },
+        { to: ROUTES.analytics, label: "التحليلات", sectionId: SUPERVISOR_SECTION_IDS.analytics },
+        { to: ROUTES.alerts, label: "التنبيهات", sectionId: SUPERVISOR_SECTION_IDS.alerts },
+        { to: ROUTES.cameras, label: "الكاميرات", sectionId: SUPERVISOR_SECTION_IDS.cameras },
+        { to: ROUTES.reports, label: "التقارير", sectionId: SUPERVISOR_SECTION_IDS.reports },
+        { to: ROUTES.dishReviews, label: "مراجعة الأطباق", sectionId: SUPERVISOR_SECTION_IDS.reviews },
+        { to: ROUTES.employees, label: "الموظفين", sectionId: SUPERVISOR_SECTION_IDS.employees },
       ];
     }
     return [
-      { href: "#analytics", label: "التحليلات", sectionId: SUPERVISOR_SECTION_IDS.analytics },
-      { href: "#alerts", label: "التنبيهات", sectionId: SUPERVISOR_SECTION_IDS.alerts },
-      { href: "#cameras", label: "الكاميرات", sectionId: SUPERVISOR_SECTION_IDS.cameras },
-      { href: "#reports", label: "التقارير", sectionId: SUPERVISOR_SECTION_IDS.reports },
-      { href: "#dish-reviews", label: "مراجعة الأطباق", sectionId: SUPERVISOR_SECTION_IDS.reviews },
-      { href: "#employees", label: "الموظفين", sectionId: SUPERVISOR_SECTION_IDS.employees },
-      { href: "#settings", label: "الإعدادات", sectionId: SUPERVISOR_SECTION_IDS.settings },
+      { to: ROUTES.analytics, label: "التحليلات", sectionId: SUPERVISOR_SECTION_IDS.analytics },
+      { to: ROUTES.alerts, label: "التنبيهات", sectionId: SUPERVISOR_SECTION_IDS.alerts },
+      { to: ROUTES.cameras, label: "الكاميرات", sectionId: SUPERVISOR_SECTION_IDS.cameras },
+      { to: ROUTES.reports, label: "التقارير", sectionId: SUPERVISOR_SECTION_IDS.reports },
+      { to: ROUTES.dishReviews, label: "مراجعة الأطباق", sectionId: SUPERVISOR_SECTION_IDS.reviews },
+      { to: ROUTES.employees, label: "الموظفين", sectionId: SUPERVISOR_SECTION_IDS.employees },
+      { to: ROUTES.settings, label: "الإعدادات", sectionId: SUPERVISOR_SECTION_IDS.settings },
     ];
   }, [role]);
 
@@ -1145,35 +1553,126 @@ export default function Dashboard() {
     [employeeFilters],
   );
 
-  const reviewTotalPages = useMemo(
-    () => Math.max(1, Math.ceil(reviewRecords.length / REVIEW_PAGE_SIZE)),
-    [reviewRecords.length],
+  const violationsReportStats = useMemo(
+    () => computeViolationsReportStats(violationsReportRows),
+    [violationsReportRows],
   );
 
-  const pagedReviewRecords = useMemo(() => {
-    const start = (reviewPage - 1) * REVIEW_PAGE_SIZE;
-    return reviewRecords.slice(start, start + REVIEW_PAGE_SIZE);
-  }, [reviewRecords, reviewPage]);
+  const violationsLatestExpand = useExpandMoreList(violationsReportStats.latest.length, 3);
 
-  const employeeTotalPages = useMemo(
-    () => Math.max(1, Math.ceil(supervisorEmployees.length / EMPLOYEE_PAGE_SIZE)),
-    [supervisorEmployees.length],
+  const violationsSortedForExport = useMemo(() => {
+    const list = Array.isArray(violationsReportRows) ? [...violationsReportRows] : [];
+    list.sort(
+      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+    );
+    return list;
+  }, [violationsReportRows]);
+
+  const dishAnalysisExportRows = useMemo(
+    () => buildDishBranchPeriodRows(reviewRecords, reviewFilters.dateFrom, reviewFilters.dateTo),
+    [reviewRecords, reviewFilters.dateFrom, reviewFilters.dateTo],
   );
 
-  const pagedSupervisorEmployees = useMemo(() => {
-    const start = (employeePage - 1) * EMPLOYEE_PAGE_SIZE;
-    return supervisorEmployees.slice(start, start + EMPLOYEE_PAGE_SIZE);
-  }, [supervisorEmployees, employeePage]);
+  /** Dish totals by name for PDF bar chart — same filtered review records as branch/period table. */
+  const dishChartBarsForPrint = useMemo(() => {
+    const rows = buildDishBranchPeriodRows(reviewRecords, violationsReportFrom, violationsReportTo);
+    const byDish = new Map();
+    for (const r of rows) {
+      byDish.set(r.dish, (byDish.get(r.dish) || 0) + r.count);
+    }
+    return Array.from(byDish.entries())
+      .map(([dish, count]) => ({ dish, count }))
+      .sort((a, b) => b.count - a.count || a.dish.localeCompare(b.dish, "ar"))
+      .slice(0, 16);
+  }, [reviewRecords, violationsReportFrom, violationsReportTo]);
 
-  useEffect(() => {
-    const maxP = Math.max(1, Math.ceil(reviewRecords.length / REVIEW_PAGE_SIZE));
-    setReviewPage((p) => Math.min(Math.max(1, p), maxP));
-  }, [reviewRecords.length]);
+  /** Aggregates for Dish Review PDF — derived from loaded review rows only. */
+  const dishReviewPdfStats = useMemo(() => {
+    const records = Array.isArray(reviewRecords) ? reviewRecords : [];
+    let pending = 0;
+    let approved = 0;
+    let rejected = 0;
+    const dishTotals = new Map();
+    const empTotals = new Map();
+    for (const r of records) {
+      const st = String(r?.status || "").toLowerCase();
+      if (st === "approved") approved += 1;
+      else if (st === "rejected") rejected += 1;
+      else if (st === "pending_review" || st === "needs_review") pending += 1;
+      else pending += 1;
+      const dish = String(r?.confirmed_label || r?.predicted_label || "").trim() || "غير محدد";
+      dishTotals.set(dish, (dishTotals.get(dish) || 0) + 1);
+      const emp = String(r?.employee_name || r?.employee_email || "").trim() || "غير محدد";
+      empTotals.set(emp, (empTotals.get(emp) || 0) + 1);
+    }
+    let topDish = "";
+    let topDishN = 0;
+    for (const [d, n] of dishTotals.entries()) {
+      if (n > topDishN) {
+        topDish = d;
+        topDishN = n;
+      }
+    }
+    let topEmp = "";
+    let topEmpN = 0;
+    for (const [e, n] of empTotals.entries()) {
+      if (n > topEmpN) {
+        topEmp = e;
+        topEmpN = n;
+      }
+    }
+    return {
+      total: records.length,
+      pending,
+      approved,
+      rejected,
+      topDish: topDishN > 0 ? `${topDish} (${topDishN})` : "—",
+      topEmployee: topEmpN > 0 ? `${topEmp} (${topEmpN})` : "—",
+    };
+  }, [reviewRecords]);
 
-  useEffect(() => {
-    const maxP = Math.max(1, Math.ceil(supervisorEmployees.length / EMPLOYEE_PAGE_SIZE));
-    setEmployeePage((p) => Math.min(Math.max(1, p), maxP));
-  }, [supervisorEmployees.length]);
+  /** الطبق | الحالة | عدد السجلات for PDF summary table. */
+  const dishReviewStatusSummaryRows = useMemo(() => {
+    const SEP = "\u001f";
+    const map = new Map();
+    for (const r of reviewRecords || []) {
+      const dish = String(r?.confirmed_label || r?.predicted_label || "").trim() || "غير محدد";
+      const ar = dishReviewStatusArExport(r?.status);
+      const key = `${dish}${SEP}${ar}`;
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .map(([key, count]) => {
+        const [dish, statusAr] = key.split(SEP);
+        return { dish, statusAr, count };
+      })
+      .sort((a, b) => b.count - a.count || a.dish.localeCompare(b.dish, "ar"));
+  }, [reviewRecords]);
+
+  /** Stacked horizontal bars: dishes × counts by review status (PDF chart). */
+  const dishReviewChartBarsForPrint = useMemo(() => {
+    const byDish = new Map();
+    for (const r of reviewRecords || []) {
+      const dish = String(r?.confirmed_label || r?.predicted_label || "").trim() || "غير محدد";
+      const st = String(r?.status || "").toLowerCase();
+      if (!byDish.has(dish)) {
+        byDish.set(dish, { approved: 0, pending: 0, rejected: 0, other: 0 });
+      }
+      const b = byDish.get(dish);
+      if (st === "approved") b.approved += 1;
+      else if (st === "rejected") b.rejected += 1;
+      else if (st === "pending_review" || st === "needs_review") b.pending += 1;
+      else b.other += 1;
+    }
+    return Array.from(byDish.entries())
+      .map(([dish, s]) => ({
+        dish,
+        ...s,
+        total: s.approved + s.pending + s.rejected + s.other,
+      }))
+      .sort((a, b) => b.total - a.total || a.dish.localeCompare(b.dish, "ar"))
+      .slice(0, 14);
+  }, [reviewRecords]);
 
   const exportSupervisorReportCsv = useCallback(() => {
     if (!supervisorSummary) {
@@ -1182,97 +1681,172 @@ export default function Dashboard() {
     }
     const s = supervisorSummary;
     const val = (v) => (v === undefined || v === null ? "" : v);
-    const filename = `ska-supervisor-summary-${new Date().toISOString().slice(0, 10)}.csv`;
-    downloadUtf8Csv(
-      filename,
+    const filename = taeenReportFilename("summary");
+    const branchLabel = String(s.branch_name || "").trim() || "—";
+    const periodReviews = formatReportPeriodLabel(reviewFilters.dateFrom, reviewFilters.dateTo);
+    const periodViolations = formatReportPeriodLabel(violationsReportFrom, violationsReportTo);
+    const preambleRows = [
+      [REPORT_PLATFORM_TITLE_AR, ""],
+      [REPORT_PLATFORM_TAGLINE_AR, ""],
+      ["تقرير الملخص التنفيذي", ""],
+      ["تاريخ إنشاء التقرير", formatReportDateYmd()],
+      ["الفرع", branchLabel],
+      ["الفترة الزمنية — سجلات الأطباق (حسب فلاتر المراجعة)", periodReviews],
+      ["الفترة الزمنية — مخالفات المراقبة (حسب فلاتر التقرير)", periodViolations],
+      ["", ""],
+    ];
+    const section = (titleAr) => [
+      ["", ""],
+      [titleAr, ""],
       ["المؤشر", "القيمة"],
-      [
-        ["إجمالي الأطباق", val(s.total_dishes)],
-        ["الأطباق هذا الأسبوع", val(s.dishes_week)],
-        ["إجمالي الكمية", val(s.total_quantity)],
-        ["معلّق للمراجعة", val(s.pending_reviews)],
-        ["المعتمد اليوم", val(s.approved_today)],
-        ["المرفوض اليوم", val(s.rejected_today)],
-        ["إجمالي الموظفين", val(s.total_employees)],
-        ["نشط اليوم", val(s.active_employees_today)],
-        ["أكثر موظف مراجعات (الاسم)", val(s.top_employee_review_name)],
-        ["عدد مراجعاته", val(s.top_employee_review_count)],
-        ["أكثر طبق مسجّل", val(s.most_common_dish)],
-        ["أكثر طبق يحتاج مراجعة", val(s.most_reviewed_dish)],
-        ["متوسط الثقة", val(s.average_confidence)],
-        ["مؤشر الجودة", val(s.quality_score ?? s.compliance_rate)],
-        ["التنبيهات", val(s.alerts_count)],
-        ["المخالفات", val(s.violations_count)],
-        ["الأطباق اليوم", val(s.dishes_today ?? s.dishes_count)],
-        ["اسم الفرع", val(s.branch_name)],
-      ],
-    );
+    ];
+    const rows = [
+      ...section("ملخص الأداء"),
+      ["إجمالي الأطباق", val(s.total_dishes)],
+      ["الأطباق هذا الأسبوع", val(s.dishes_week)],
+      ["إجمالي الكمية", val(s.total_quantity)],
+      ["مؤشر الجودة", val(s.quality_score ?? s.compliance_rate)],
+      ["متوسط الثقة", val(s.average_confidence)],
+      ["التنبيهات", val(s.alerts_count)],
+      ["إجمالي الموظفين", val(s.total_employees)],
+      ["نشط اليوم", val(s.active_employees_today)],
+      ...section("ملخص الأطباق"),
+      ["معلّق للمراجعة", val(s.pending_reviews)],
+      ["المعتمد اليوم", val(s.approved_today)],
+      ["المرفوض اليوم", val(s.rejected_today)],
+      ["الأطباق اليوم", val(s.dishes_today ?? s.dishes_count)],
+      ["أكثر موظف مراجعات (الاسم)", val(s.top_employee_review_name)],
+      ["عدد مراجعاته", val(s.top_employee_review_count)],
+      ["أكثر طبق مسجّل", val(s.most_common_dish)],
+      ["أكثر طبق يحتاج مراجعة", val(s.most_reviewed_dish)],
+      ...section("ملخص المخالفات"),
+      ["عدد المخالفات (ملخص الخادم)", val(s.violations_count)],
+      ["إجمالي سجلات التقرير المحمّل", val(violationsReportStats.total)],
+      ["مفتوح / غير المعالج", val(violationsReportStats.openCount)],
+      ["تمت المعالجة", val(violationsReportStats.resolvedCount)],
+      ["أكثر نوع تكرارًا (ضمن التقرير)", val(violationsReportStats.topRepeated.label)],
+      ["عدد تكرار ذلك النوع", val(violationsReportStats.topRepeated.count)],
+      ...VIOLATION_REPORT_CATEGORY_ORDER.map((c) => [
+        `عدد — ${c.label}`,
+        val(violationsReportStats.typeCounts[c.key]),
+      ]),
+      ...(violationsReportStats.typeCounts._other > 0
+        ? [[`عدد — أخرى`, val(violationsReportStats.typeCounts._other)]]
+        : []),
+      ["", ""],
+      ["تحليل الأطباق حسب الفرع والفترة (البيانات المصفّاة)", "", "", ""],
+      ["الطبق", "الفرع", "عدد السجلات", "الفترة الزمنية"],
+      ...dishAnalysisExportRows.map((r) => [r.dish, r.branch, r.count, r.periodLabel]),
+    ];
+    downloadUtf8Csv(filename, [], rows, { preambleRows });
     setToast({ type: "success", text: "تم تنزيل تقرير CSV للملخص." });
-  }, [supervisorSummary, setToast]);
+  }, [
+    dishAnalysisExportRows,
+    reviewFilters.dateFrom,
+    reviewFilters.dateTo,
+    setToast,
+    supervisorSummary,
+    violationsReportFrom,
+    violationsReportStats,
+    violationsReportTo,
+  ]);
 
   const exportReviewRecordsCsv = useCallback(() => {
     if (!reviewRecords.length) {
       setToast({ type: "error", text: "لا توجد سجلات مراجعة للتصدير." });
       return;
     }
-    const filename = `ska-dish-reviews-${new Date().toISOString().slice(0, 10)}.csv`;
+    const branchLabel =
+      String(supervisorSummary?.branch_name || "").trim() ||
+      String(reviewRecords.find((r) => r.branch_name || r.branch)?.branch_name ||
+        reviewRecords.find((r) => r.branch_name || r.branch)?.branch ||
+        "").trim() ||
+      "—";
+    const preambleRows = [
+      [REPORT_PLATFORM_TITLE_AR, ""],
+      [REPORT_PLATFORM_TAGLINE_AR, ""],
+      ["تقرير مراجعة الأطباق", ""],
+      ["تاريخ إنشاء التقرير", formatReportDateYmd()],
+      ["الفرع", branchLabel],
+      ["الفترة الزمنية", formatReportPeriodLabel(reviewFilters.dateFrom, reviewFilters.dateTo)],
+      ["", ""],
+    ];
     downloadUtf8Csv(
-      filename,
-      [
-        "id",
-        "status",
-        "predicted_label",
-        "confirmed_label",
-        "quantity",
-        "employee_name",
-        "employee_email",
-        "recorded_at",
-        "reviewed_at",
-        "ai_confidence",
-      ],
-      reviewRecords.map((r) => [
-        r.id,
-        r.status,
-        r.predicted_label,
-        r.confirmed_label,
-        r.quantity,
-        r.employee_name,
-        r.employee_email,
-        r.recorded_at,
-        r.reviewed_at,
-        r.ai_confidence,
+      taeenReportFilename("dish-review"),
+      ["رقم", "اسم الموظف", "اسم الطبق المقترح", "اسم الطبق المعتمد", "الكمية", "الحالة", "وقت التسجيل", "وقت المراجعة"],
+      reviewRecords.map((r, idx) => [
+        idx + 1,
+        r.employee_name || "—",
+        r.predicted_label || "—",
+        r.confirmed_label || "—",
+        r.quantity ?? "",
+        dishReviewStatusArExport(r.status),
+        r.recorded_at ? formatSaudiDateTime(r.recorded_at) : "—",
+        r.reviewed_at ? formatSaudiDateTime(r.reviewed_at) : "—",
       ]),
+      { preambleRows },
     );
     setToast({ type: "success", text: "تم تنزيل سجلات المراجعة." });
-  }, [reviewRecords, setToast]);
-
-  const violationsReportStats = useMemo(
-    () => computeViolationsReportStats(violationsReportRows),
-    [violationsReportRows],
-  );
+  }, [reviewFilters.dateFrom, reviewFilters.dateTo, reviewRecords, setToast, supervisorSummary]);
 
   const exportViolationsReportLatestCsv = useCallback(() => {
-    const latest = violationsReportStats.latest;
-    if (!latest.length) {
-      setToast({ type: "error", text: "لا توجد صفوف في جدول أحدث المخالفات للتصدير." });
+    if (!violationsSortedForExport.length) {
+      setToast({ type: "error", text: "لا توجد صفوف مخالفات للتصدير." });
       return;
     }
+    const branchLabel =
+      String(supervisorSummary?.branch_name || "").trim() ||
+      String(
+        violationsSortedForExport.find((r) => r.branch_name || r.branch)?.branch_name ||
+          violationsSortedForExport.find((r) => r.branch_name || r.branch)?.branch ||
+          "",
+      ).trim() ||
+      "—";
+    const preambleRows = [
+      [REPORT_PLATFORM_TITLE_AR, ""],
+      [REPORT_PLATFORM_TAGLINE_AR, ""],
+      ["تقرير مخالفات المراقبة", ""],
+      ["تاريخ إنشاء التقرير", formatReportDateYmd()],
+      ["الفرع", branchLabel],
+      ["الفترة الزمنية", formatReportPeriodLabel(violationsReportFrom, violationsReportTo)],
+      ["", ""],
+    ];
     downloadUtf8Csv(
-      `ska-violations-latest-${new Date().toISOString().slice(0, 10)}.csv`,
-      ["النوع", "التفاصيل", "الحالة", "الفرع", "الكاميرا", "الوقت"],
-      latest.map((row) => [
-        violationReportTypeLabel(row.type) || row.label_ar || row.type || "—",
+      taeenReportFilename("monitoring"),
+      [
+        "رقم",
+        "نوع المخالفة",
+        "التفاصيل",
+        "الكاميرا",
+        "الفرع / المنطقة",
+        "نسبة الثقة",
+        "مستوى الخطورة",
+        "الحالة",
+        "التاريخ والوقت",
+      ],
+      violationsSortedForExport.map((row, idx) => [
+        idx + 1,
+        violationTypeLabelForReport(row),
         String(row.details || "—")
           .replace(/\s+/g, " ")
           .trim(),
-        monitoringAlertStatusAr(row.status),
-        row.branch || "—",
         row.camera_name || "—",
+        formatAlertBranchArea(row),
+        formatMonitoringConfidencePercent(row.confidence),
+        monitoringSeverityLabelAr(row.confidence),
+        monitoringAlertStatusArExport(row.status),
         formatSaudiDateTime(row.created_at),
       ]),
+      { preambleRows },
     );
-    setToast({ type: "success", text: "تم تنزيل CSV لأحدث المخالفات." });
-  }, [violationsReportStats.latest, setToast]);
+    setToast({ type: "success", text: "تم تنزيل CSV لتقرير المخالفات." });
+  }, [
+    setToast,
+    supervisorSummary,
+    violationsReportFrom,
+    violationsReportTo,
+    violationsSortedForExport,
+  ]);
 
   const printViolationsReportPdf = useCallback(() => {
     if (!violationsReportStats.total) {
@@ -1284,8 +1858,39 @@ export default function Dashboard() {
       setToast({ type: "error", text: "تعذر تجهيز صفحة التقرير." });
       return;
     }
+    document.body.classList.add("ska-print-violations-only");
+    const prevTitle = document.title;
+    document.title = `taeen-quality-monitoring-report-${formatReportDateYmd()}`;
+    const onAfterPrint = () => {
+      document.body.classList.remove("ska-print-violations-only");
+      document.title = prevTitle;
+      window.removeEventListener("afterprint", onAfterPrint);
+    };
+    window.addEventListener("afterprint", onAfterPrint);
     setTimeout(() => window.print(), 100);
   }, [violationsReportStats.total, setToast]);
+
+  const printDishReviewReportPdf = useCallback(() => {
+    if (!reviewRecords.length) {
+      setToast({ type: "error", text: "لا توجد سجلات مراجعة للتصدير." });
+      return;
+    }
+    const el = document.getElementById("ska-dish-review-report-print");
+    if (!el || !el.querySelector("tbody tr")) {
+      setToast({ type: "error", text: "تعذر تجهيز صفحة التقرير." });
+      return;
+    }
+    document.body.classList.add("ska-print-dish-review-only");
+    const prevTitle = document.title;
+    document.title = `taeen-quality-dish-review-report-${formatReportDateYmd()}`;
+    const onAfterPrint = () => {
+      document.body.classList.remove("ska-print-dish-review-only");
+      document.title = prevTitle;
+      window.removeEventListener("afterprint", onAfterPrint);
+    };
+    window.addEventListener("afterprint", onAfterPrint);
+    setTimeout(() => window.print(), 100);
+  }, [reviewRecords.length, setToast]);
 
   const supervisorCards = useMemo(
     () => {
@@ -1339,20 +1944,109 @@ export default function Dashboard() {
 
   const hasMonitoringData =
     Number(supervisorSummary?.dishes_today || 0) > 0 || Number(supervisorSummary?.violations_count || 0) > 0;
-  const supervisorHeaderStats = useMemo(
-    () => [
-      { label: "الدور", value: role === "admin" ? "مدير النظام" : role === "supervisor" ? "مشرف" : "—" },
-      { label: "القسم الحالي", value: navLinks.find((n) => n.sectionId === activeSection)?.label || "التحليلات" },
-      { label: "التنبيهات", value: alertsLoading ? "..." : String(alertsList.length) },
-      { label: "الكاميرات", value: cameraCardsLoading ? "..." : String(cameraCards.length) },
-      { label: "طلبات المراجعة", value: reviewLoading ? "..." : String(reviewRecords.length) },
+  const supervisorBranchHighlights = useMemo(() => {
+    const noData = "لا توجد بيانات كافية";
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const monthRecords = reviewRecords.filter((r) => {
+      const t = new Date(r?.recorded_at || "").getTime();
+      return Number.isFinite(t) && t >= startOfMonth.getTime();
+    });
+
+    const preferredMonthRecords = monthRecords.filter((r) => String(r?.status || "") === "approved");
+    const monthSource = preferredMonthRecords.length ? preferredMonthRecords : monthRecords;
+    const employeeMonthCounter = new Map();
+    monthSource.forEach((r) => {
+      const key = String(r?.employee_name || r?.employee_email || "").trim();
+      if (!key) return;
+      employeeMonthCounter.set(key, (employeeMonthCounter.get(key) || 0) + 1);
+    });
+    let employeeMonth = null;
+    for (const [name, count] of employeeMonthCounter.entries()) {
+      if (!employeeMonth || count > employeeMonth.count) employeeMonth = { name, count };
+    }
+
+    let mostActive = null;
+    supervisorEmployees.forEach((e) => {
+      const total = Number(e?.total_dishes);
+      if (!Number.isFinite(total)) return;
+      const label = String(e?.full_name || e?.username || "").trim();
+      if (!label) return;
+      if (!mostActive || total > mostActive.count) {
+        mostActive = { name: label, count: total };
+      }
+    });
+
+    const dishCounter = new Map();
+    monthRecords.forEach((r) => {
+      const dish = String(r?.confirmed_label || r?.predicted_label || "").trim();
+      if (!dish) return;
+      dishCounter.set(dish, (dishCounter.get(dish) || 0) + 1);
+    });
+    let dishMonth = null;
+    for (const [name, count] of dishCounter.entries()) {
+      if (!dishMonth || count > dishMonth.count) dishMonth = { name, count };
+    }
+
+    const violationCounter = new Map();
+    alertsList.forEach((a) => {
+      const key = String(a?.label_ar || a?.type || "—").trim();
+      if (!key || key === "—") return;
+      violationCounter.set(key, (violationCounter.get(key) || 0) + 1);
+    });
+    let topViolation = null;
+    for (const [name, count] of violationCounter.entries()) {
+      if (!topViolation || count > topViolation.count) topViolation = { name, count };
+    }
+
+    const pendingReviewsCount =
+      Number.isFinite(Number(supervisorSummary?.pending_reviews))
+        ? Number(supervisorSummary?.pending_reviews)
+        : reviewRecords.filter((r) => {
+            const s = String(r?.status || "");
+            return s === "needs_review" || s === "pending_review";
+          }).length;
+
+    return [
       {
-        label: "آخر تحليل",
-        value: monitoringLastAnalyzedAt ? formatSaudiDateTime(monitoringLastAnalyzedAt) : "غير متوفر",
+        key: "employee-month",
+        title: "موظف الشهر",
+        value: employeeMonth ? `${employeeMonth.name} (${employeeMonth.count})` : noData,
+        subtitle: "حسب سجلات هذا الشهر",
+        icon: IconChart,
       },
-    ],
-    [activeSection, alertsList.length, alertsLoading, cameraCards.length, cameraCardsLoading, monitoringLastAnalyzedAt, navLinks, reviewLoading, reviewRecords.length, role]
-  );
+      {
+        key: "employee-most-active",
+        title: "أكثر موظف نشاطًا",
+        value: mostActive ? `${mostActive.name} (${mostActive.count})` : noData,
+        subtitle: "حسب بيانات الفرع",
+        icon: IconActivity,
+      },
+      {
+        key: "dish-month",
+        title: "طبق الشهر",
+        value: dishMonth ? `${dishMonth.name} (${dishMonth.count})` : noData,
+        subtitle: "حسب سجلات هذا الشهر",
+        icon: IconDish,
+      },
+      {
+        key: "top-violation",
+        title: "أكثر مخالفة تكرارًا",
+        value: topViolation ? `${topViolation.name} (${topViolation.count})` : noData,
+        subtitle: "حسب بيانات الفرع",
+        icon: IconBell,
+      },
+      {
+        key: "pending-reviews",
+        title: "طلبات تحتاج مراجعة",
+        value: Number.isFinite(pendingReviewsCount) ? String(pendingReviewsCount) : noData,
+        subtitle: "الحالة الحالية",
+        icon: IconActivity,
+      },
+    ];
+  }, [alertsList, reviewRecords, supervisorEmployees, supervisorSummary]);
 
   const loadSupervisorSummary = useCallback(async () => {
     if (!(role === "supervisor" || role === "admin")) return;
@@ -1503,7 +2197,7 @@ export default function Dashboard() {
 
   const fetchViolationsReport = useCallback(
     async (fromStr, toStr) => {
-      if (role !== "admin") return;
+      if (!(role === "supervisor" || role === "admin")) return;
       const token = getAccessToken();
       if (!token) return;
       const from = String(fromStr || "").trim();
@@ -1545,15 +2239,6 @@ export default function Dashboard() {
   );
 
   useEffect(() => {
-    if (location.pathname !== "/monitoring") return;
-    if (!(role === "supervisor" || role === "admin")) return;
-    setActiveSection(SUPERVISOR_SECTION_IDS.cameras);
-    if (typeof window !== "undefined" && window.location.hash !== "#cameras") {
-      window.location.hash = "#cameras";
-    }
-  }, [location.pathname, role]);
-
-  useEffect(() => {
     if (!(role === "supervisor" || role === "admin")) return;
     void loadSupervisorReviews();
   }, [role, loadSupervisorReviews]);
@@ -1575,27 +2260,7 @@ export default function Dashboard() {
   }, [role, loadSupervisorCameras, loadSupervisorAlerts]);
 
   useEffect(() => {
-    setAlertsVisibleCount(ALERTS_PAGE_STEP);
-  }, [alertsList.length]);
-
-  useEffect(() => {
-    setReviewPage(1);
-  }, [
-    reviewFilters.employee,
-    reviewFilters.dishType,
-    reviewFilters.dateFrom,
-    reviewFilters.dateTo,
-    reviewFilters.confidenceMin,
-    reviewFilters.confidenceMax,
-    reviewFilters.status,
-  ]);
-
-  useEffect(() => {
-    setEmployeePage(1);
-  }, [employeeFilters.search, employeeFilters.role, employeeFilters.activeToday, employeeFilters.hasPendingReviews]);
-
-  useEffect(() => {
-    if (role !== "admin") {
+    if (!(role === "supervisor" || role === "admin")) {
       setViolationsReportRows([]);
       setViolationsReportError("");
       return undefined;
@@ -1699,28 +2364,179 @@ export default function Dashboard() {
     }
   }
 
-  // Shared fetch helper used by both image upload and video frame analysis.
-  // Builds FormData with the exact same keys the backend expects, POSTs to
-  // MONITORING_ANALYZE_URL, and returns { ok, status, body } — no side effects.
-  async function callAnalyzeFrameEndpoint(imageFile, token) {
-    const fd = new FormData();
-    fd.append("image", imageFile);
-    if (monitoringCameraSelectId) {
-      const idNum = Number(monitoringCameraSelectId);
-      if (Number.isFinite(idNum)) fd.append("camera_id", String(idNum));
+  // Shared fetch helper used by image upload, video frames, and live 1 Hz monitoring.
+  const callAnalyzeFrameEndpoint = useCallback(
+    async (imageFile, token) => {
+      const fd = new FormData();
+      fd.append("image", imageFile);
+      if (monitoringCameraSelectId) {
+        const idNum = Number(monitoringCameraSelectId);
+        if (Number.isFinite(idNum)) fd.append("camera_id", String(idNum));
+      }
+      const sel = cameraCards.find((c) => String(c.id) === String(monitoringCameraSelectId));
+      const zoneMeta = MONITORING_ZONE_DEFINITIONS.find((z) => z.id === selectedMonitoringZoneId);
+      const savedZoneCam = restaurantCamConfigs[selectedMonitoringZoneId];
+      let name = (newCameraForm.name || "").trim() || (sel?.name || "").trim();
+      let loc = (newCameraForm.location || "").trim() || (sel?.location || "").trim();
+      if (savedZoneCam?.cameraName?.trim()) name = savedZoneCam.cameraName.trim();
+      if (!name && zoneMeta) name = zoneMeta.displayNameAr;
+      if (!loc && zoneMeta) loc = zoneMeta.zoneAr;
+      if (name) fd.append("camera_name", name);
+      if (loc) fd.append("location", loc);
+      const res = await fetch(MONITORING_ANALYZE_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const body = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, body };
+    },
+    [
+      monitoringCameraSelectId,
+      cameraCards,
+      newCameraForm.name,
+      newCameraForm.location,
+      selectedMonitoringZoneId,
+      restaurantCamConfigs,
+    ],
+  );
+
+  const tickLiveMonitoringAnalysis = useCallback(async () => {
+    if (!(role === "supervisor" || role === "admin")) return;
+    if (!monitoringWebcamOn || !monitoringLiveAutoOn) return;
+    const video = monitoringLiveVideoRef.current;
+    if (!video || video.readyState < 2) return;
+    if (liveAnalysisInFlightRef.current) return;
+    const gen = liveGenRef.current;
+    const token = getAccessToken();
+    if (!token) return;
+
+    liveAnalysisInFlightRef.current = true;
+    setLiveTickBusy(true);
+    try {
+      const blob = await captureLiveMonitoringBlob(video);
+      if (!blob || gen !== liveGenRef.current) return;
+      const file = new File([blob], `live-${Date.now()}.jpg`, { type: "image/jpeg" });
+      const { ok, status, body } = await callAnalyzeFrameEndpoint(file, token);
+      if (gen !== liveGenRef.current) return;
+      if (handleProtectedAuthFailure(status, body?.detail)) return;
+      if (!ok) return;
+
+      setMonitoringAnalysisResult(body);
+      setMonitoringLastAnalyzedAt(new Date().toISOString());
+
+      const zoneId = selectedMonitoringZoneIdRef.current;
+      const tier = liveRiskToTier(body?.frame_report?.overall_risk_level, body?.violations);
+      const violationsSummary = summarizeLiveViolations(body?.violations);
+
+      setLiveSlotStates((prev) => ({
+        ...prev,
+        [zoneId]: {
+          tier,
+          statusLabel: body?.frame_report?.overall_risk_ar || "—",
+          violationsSummary,
+          peopleCount: typeof body?.people_count === "number" ? body.people_count : null,
+          lastAtLabel: formatSaudiDateTime(new Date().toISOString()),
+        },
+      }));
+
+      const now = Date.now();
+      if (now - liveAlertsThrottleRef.current >= 2800) {
+        liveAlertsThrottleRef.current = now;
+        void loadSupervisorAlerts();
+      }
+      void loadSupervisorSummary();
+    } finally {
+      liveAnalysisInFlightRef.current = false;
+      setLiveTickBusy(false);
     }
-    const sel = cameraCards.find((c) => String(c.id) === String(monitoringCameraSelectId));
-    const name = (newCameraForm.name || "").trim() || (sel?.name || "").trim();
-    const loc = (newCameraForm.location || "").trim() || (sel?.location || "").trim();
-    if (name) fd.append("camera_name", name);
-    if (loc) fd.append("location", loc);
-    const res = await fetch(MONITORING_ANALYZE_URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: fd,
+  }, [
+    role,
+    getAccessToken,
+    monitoringWebcamOn,
+    monitoringLiveAutoOn,
+    callAnalyzeFrameEndpoint,
+    handleProtectedAuthFailure,
+    loadSupervisorAlerts,
+    loadSupervisorSummary,
+  ]);
+
+  useEffect(() => {
+    selectedMonitoringZoneIdRef.current = selectedMonitoringZoneId;
+  }, [selectedMonitoringZoneId]);
+
+  useEffect(() => {
+    const stream = monitoringWebcamStreamRef.current;
+    const targets = [monitoringLiveVideoRef, livePrevKitchenRef, livePrevStorageRef, livePrevPrepRef];
+    targets.forEach((r) => {
+      if (r.current) r.current.srcObject = monitoringWebcamOn && stream ? stream : null;
     });
-    const body = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, body };
+  }, [monitoringWebcamOn]);
+
+  useEffect(() => {
+    if (!monitoringLiveAutoOn || !monitoringWebcamOn) {
+      if (liveAnalysisIntervalRef.current != null) {
+        clearInterval(liveAnalysisIntervalRef.current);
+        liveAnalysisIntervalRef.current = null;
+      }
+      return undefined;
+    }
+    const id = window.setInterval(() => void tickLiveMonitoringAnalysis(), 1000);
+    liveAnalysisIntervalRef.current = id;
+    void tickLiveMonitoringAnalysis();
+    return () => {
+      clearInterval(id);
+      liveAnalysisIntervalRef.current = null;
+    };
+  }, [monitoringLiveAutoOn, monitoringWebcamOn, tickLiveMonitoringAnalysis]);
+
+  /** Capture one JPEG frame from the in-browser preview and reuse the same analyze-frame API. */
+  async function analyzeMonitoringWebcamFrame() {
+    if (!(role === "supervisor" || role === "admin")) return;
+    const token = getAccessToken();
+    if (!token) {
+      setToast({ type: "error", text: "يجب تسجيل الدخول." });
+      return;
+    }
+    const video = monitoringLiveVideoRef.current;
+    if (!video || video.readyState < 2) {
+      setToast({ type: "error", text: "شغّل كاميرا الجهاز ثم انتظر ظهور المعاينة." });
+      return;
+    }
+    setMonitoringWebcamBusy(true);
+    setMonitoringAnalyzeLoading(true);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("no_canvas");
+      ctx.drawImage(video, 0, 0);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
+      if (!blob) throw new Error("no_blob");
+      const file = new File([blob], "device-camera.jpg", { type: "image/jpeg" });
+      const { ok, status, body } = await callAnalyzeFrameEndpoint(file, token);
+      if (handleProtectedAuthFailure(status, body?.detail)) return;
+      if (!ok) {
+        const errDetail = typeof body?.detail === "string" && body.detail.trim() ? body.detail : null;
+        setToast({ type: "error", text: errDetail || "فشل تحليل اللقطة." });
+        return;
+      }
+      setMonitoringAnalysisResult(body);
+      setMonitoringLastAnalyzedAt(new Date().toISOString());
+      setToast({
+        type: "success",
+        text: Number(body?.alerts_created) > 0 ? "تم تسجيل مخالفة" : "تم تحليل اللقطة.",
+      });
+      await loadSupervisorAlerts();
+      await loadSupervisorCameras();
+      await loadSupervisorSummary();
+    } catch (_err) {
+      setToast({ type: "error", text: "تعذر التقاط أو تحليل الصورة من الكاميرا." });
+    } finally {
+      setMonitoringWebcamBusy(false);
+      setMonitoringAnalyzeLoading(false);
+    }
   }
 
   async function analyzeMonitoringFrameUpload() {
@@ -1735,7 +2551,6 @@ export default function Dashboard() {
       const { ok, status, body } = await callAnalyzeFrameEndpoint(cameraTestFile, token);
       if (handleProtectedAuthFailure(status, body?.detail)) return;
       if (!ok) {
-        console.error("[monitoring] analyze-frame failed", { status, detail: body?.detail, url: MONITORING_ANALYZE_URL });
         const errDetail = typeof body?.detail === "string" && body.detail.trim() ? body.detail : null;
         if (status === 503) {
           setToast({ type: "error", text: errDetail || "تعذر تحليل الصورة. تحقق من إعدادات الذكاء الاصطناعي أو فعّل وضع التجريبي." });
@@ -1754,8 +2569,7 @@ export default function Dashboard() {
       await loadSupervisorAlerts();
       await loadSupervisorCameras();
       await loadSupervisorSummary();
-    } catch (err) {
-      console.error("[monitoring] analyzeMonitoringFrameUpload exception:", err);
+    } catch (_err) {
       setToast({ type: "error", text: "فشل تحليل الصورة. تحقق من إعدادات الذكاء الاصطناعي." });
     } finally {
       setMonitoringAnalyzeLoading(false);
@@ -1768,8 +2582,6 @@ export default function Dashboard() {
       setCameraVideoError("");
       setMonitoringVideoResults([]);
       setMonitoringVideoFrameResults([]);
-      setMonitoringVideoAnalyzedTimes([]);
-      setMonitoringVideoRawViolationCount(0);
       setMonitoringVideoAlertsCreated(0);
       return;
     }
@@ -1782,8 +2594,6 @@ export default function Dashboard() {
     setCameraVideoFile(file);
     setMonitoringVideoResults([]);
     setMonitoringVideoFrameResults([]);
-    setMonitoringVideoAnalyzedTimes([]);
-    setMonitoringVideoRawViolationCount(0);
     setMonitoringVideoAlertsCreated(0);
   }
 
@@ -1824,8 +2634,6 @@ export default function Dashboard() {
     setMonitoringVideoProgressText("جاري تجهيز الفيديو...");
     setMonitoringVideoResults([]);
     setMonitoringVideoFrameResults([]);
-    setMonitoringVideoAnalyzedTimes([]);
-    setMonitoringVideoRawViolationCount(0);
     setMonitoringVideoAlertsCreated(0);
     try {
       const url = URL.createObjectURL(cameraVideoFile);
@@ -1838,15 +2646,13 @@ export default function Dashboard() {
         video.onerror = () => reject(new Error("video_metadata_failed"));
       });
       const duration = Number(video.duration);
-      const times = makeVideoFrameTimes(duration, 14);
+      const times = makeVideoFrameTimes(duration, 24);
       if (!times.length) {
         setToast({ type: "error", text: "تعذر قراءة مدة الفيديو للتحليل." });
         URL.revokeObjectURL(url);
         return;
       }
       const frameRows = [];
-      const bestByType = new Map();
-      let rawViolationCount = 0;
       let alertsCreated = 0;
       let apiErrorShown = false;
       for (let i = 0; i < times.length; i += 1) {
@@ -1862,7 +2668,6 @@ export default function Dashboard() {
           return;
         }
         if (!ok) {
-          console.error("[monitoring] video frame failed", { frame: i, atSecond: t, status, detail: body?.detail });
           if (!apiErrorShown) {
             apiErrorShown = true;
             const errDetail = typeof body?.detail === "string" && body.detail.trim() ? body.detail : null;
@@ -1879,15 +2684,20 @@ export default function Dashboard() {
         }
         alertsCreated += Number(body?.alerts_created || 0);
         const violations = Array.isArray(body?.violations) ? body.violations : [];
-        rawViolationCount += violations.length;
-        const normalized = violations.map((v, idx) => ({
+        const normalized = violations
+          .filter((v) => v && !v.alias_of)
+          .map((v, idx) => ({
           id: `${i}-${idx}-${v?.type || "x"}`,
           atSecond: t,
           type: v?.label_ar || v?.type || "غير محدد",
-          typeKey: String(v?.type || v?.label_ar || `unknown-${idx}`).trim().toLowerCase(),
+          typeKey: canonicalMonitoringViolationType(
+            String(v?.type || v?.label_ar || `unknown-${idx}`).trim().toLowerCase(),
+          ),
           confidence: Number(v?.confidence || 0),
           status: v?.status || "open",
           reason: v?.reason_ar || "",
+          personIndex: v?.person_index ?? null,
+          aliasOf: v?.alias_of ?? null,
           frameId: `frame-${i}`,
         }));
         frameRows.push({
@@ -1895,20 +2705,23 @@ export default function Dashboard() {
           atSecond: t,
           frameUrl,
           violations: normalized,
+          frameReport: body?.frame_report || null,
           errorText: "",
-        });
-        normalized.forEach((v) => {
-          const prev = bestByType.get(v.typeKey);
-          if (!prev || Number(v.confidence || 0) > Number(prev.confidence || 0)) {
-            bestByType.set(v.typeKey, v);
-          }
         });
       }
       URL.revokeObjectURL(url);
-      const aggregated = Array.from(bestByType.values()).sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0));
+      const flatViolations = [];
+      frameRows.forEach((frame) => {
+        if (frame.errorText) return;
+        (frame.violations || []).forEach((v) => {
+          if (v.aliasOf) return;
+          flatViolations.push(v);
+        });
+      });
+      const aggregated = mergeNearbyMonitoringViolations(flatViolations, 0.9).sort(
+        (a, b) => Number(b.confidence || 0) - Number(a.confidence || 0),
+      );
       setMonitoringVideoFrameResults(frameRows);
-      setMonitoringVideoAnalyzedTimes(times);
-      setMonitoringVideoRawViolationCount(rawViolationCount);
       setMonitoringVideoResults(aggregated);
       setMonitoringVideoAlertsCreated(alertsCreated);
       setMonitoringLastAnalyzedAt(new Date().toISOString());
@@ -1924,8 +2737,7 @@ export default function Dashboard() {
       await loadSupervisorAlerts();
       await loadSupervisorCameras();
       await loadSupervisorSummary();
-    } catch (err) {
-      console.error("[monitoring] analyzeMonitoringVideoUpload exception:", err);
+    } catch (_err) {
       setToast({ type: "error", text: "تعذر تحليل الفيديو حالياً." });
     } finally {
       setMonitoringVideoAnalyzeLoading(false);
@@ -2152,8 +2964,7 @@ export default function Dashboard() {
         setQuantity(1);
         setSourceEntity("");
       },
-      onNetworkError: (err) => {
-        console.error("[dish save] network or parse error", err);
+      onNetworkError: (_err) => {
         setDishNotice({
           type: "error",
           text: "تعذر الاتصال بالخادم أو قراءة الاستجابة. تحقق من تشغيل الـ backend والشبكة.",
@@ -2188,9 +2999,347 @@ export default function Dashboard() {
     monitoringVideoFrameResults.length > 0 &&
     monitoringVideoFrameResults.every((f) => Boolean(f.errorText));
 
+  const selectedZoneMeta = useMemo(
+    () =>
+      MONITORING_ZONE_DEFINITIONS.find((z) => z.id === selectedMonitoringZoneId) ||
+      MONITORING_ZONE_DEFINITIONS[0],
+    [selectedMonitoringZoneId],
+  );
+
+  const mergedRestaurantCamConfigs = useMemo(
+    () => mergeRestaurantCameraDefaults(MONITORING_ZONE_DEFINITIONS, restaurantCamConfigs),
+    [restaurantCamConfigs],
+  );
+
+  const cctvDashboardSummary = useMemo(() => {
+    const ymd = todayIsoDateLocal();
+    const todayAlerts = alertsList.filter((a) => isAlertToday(a, ymd));
+    let worstZone = MONITORING_ZONE_DEFINITIONS[0];
+    let worstN = -1;
+    for (const z of MONITORING_ZONE_DEFINITIONS) {
+      const n = alertsForZone(z, todayAlerts).length;
+      if (n > worstN) {
+        worstN = n;
+        worstZone = z;
+      }
+    }
+    const apiStreams = cameraCards.filter(
+      (c) => c?.is_connected && String(c?.stream_url || c?.streamUrl || "").trim(),
+    ).length;
+    const deviceLiveStream = monitoringWebcamOn && monitoringLiveAutoOn ? 1 : 0;
+    const connectedCams = apiStreams + deviceLiveStream;
+    const people =
+      supervisorSummary?.total_employees ??
+      supervisorSummary?.active_employees_today ??
+      "—";
+    return {
+      totalZones: MONITORING_ZONE_DEFINITIONS.length,
+      activeStreams: connectedCams,
+      violationsToday: todayAlerts.length,
+      worstZoneLabel: worstN > 0 ? worstZone.zoneAr : "لا يوجد",
+      peopleCount: people,
+    };
+  }, [
+    alertsList,
+    cameraCards,
+    supervisorSummary,
+    monitoringWebcamOn,
+    monitoringLiveAutoOn,
+  ]);
+
+  const stopMonitoringWebcam = useCallback(() => {
+    liveGenRef.current += 1;
+    setMonitoringLiveAutoOn(false);
+    if (liveAnalysisIntervalRef.current != null) {
+      clearInterval(liveAnalysisIntervalRef.current);
+      liveAnalysisIntervalRef.current = null;
+    }
+    try {
+      monitoringWebcamStreamRef.current?.getTracks?.().forEach((t) => t.stop());
+    } catch {
+      /* ignore */
+    }
+    monitoringWebcamStreamRef.current = null;
+    const targets = [monitoringLiveVideoRef, livePrevKitchenRef, livePrevStorageRef, livePrevPrepRef];
+    targets.forEach((r) => {
+      if (r.current) r.current.srcObject = null;
+    });
+    setMonitoringWebcamOn(false);
+  }, []);
+
+  const startMonitoringWebcam = useCallback(async () => {
+    setMonitoringWebcamError("");
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setMonitoringWebcamError("المتصفح لا يدعم الكاميرا.");
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
+        audio: false,
+      });
+      monitoringWebcamStreamRef.current = stream;
+      const el = monitoringLiveVideoRef.current;
+      if (el) {
+        el.srcObject = stream;
+        await el.play().catch(() => {});
+      }
+      setMonitoringWebcamOn(true);
+    } catch {
+      setMonitoringWebcamError("تعذر الوصول إلى كاميرا الجهاز. تحقق من أذونات المتصفح.");
+      stopMonitoringWebcam();
+    }
+  }, [stopMonitoringWebcam]);
+
+  const handleRestaurantCameraSave = useCallback(
+    (zoneId, draft) => {
+      const zone = MONITORING_ZONE_DEFINITIONS.find((z) => z.id === zoneId);
+      const errs = validateRestaurantCameraDraft(draft);
+      if (errs.length) {
+        setToast({ type: "error", text: errs[0] });
+        return;
+      }
+      setCameraSetupBusy((b) => ({ ...b, save: zoneId }));
+      try {
+        setRestaurantCamConfigs((prev) => {
+          const payload = prepareSavePayload(draft, prev[zoneId], zone?.displayNameAr || "");
+          const next = { ...prev, [zoneId]: payload };
+          persistRestaurantCameraConfigs(next);
+          return next;
+        });
+        setToast({ type: "success", text: "تم حفظ إعدادات الكاميرا." });
+      } finally {
+        setCameraSetupBusy((b) => ({ ...b, save: null }));
+      }
+    },
+    [setToast],
+  );
+
+  const handleRestaurantCameraTest = useCallback(
+    async (zoneId, draft) => {
+      const errs = validateRestaurantCameraDraft(draft);
+      if (errs.length) {
+        setToast({ type: "error", text: errs[0] });
+        return;
+      }
+      setCameraSetupBusy((b) => ({ ...b, test: zoneId }));
+      const nowIso = new Date().toISOString();
+      let ok = false;
+
+      try {
+        await new Promise((r) => setTimeout(r, 450));
+        const t = draft.connectionType;
+
+        if (t === RESTAURANT_CONNECTION_TYPES.DEVICE_WEBCAM) {
+          if (!navigator.mediaDevices?.getUserMedia) {
+            ok = false;
+          } else {
+            try {
+              const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+              s.getTracks().forEach((tr) => tr.stop());
+              ok = true;
+            } catch {
+              ok = false;
+            }
+          }
+        } else if (t === RESTAURANT_CONNECTION_TYPES.UPLOADED_VIDEO) {
+          ok = true;
+        } else {
+          ok = true;
+        }
+
+        setRestaurantCamConfigs((prev) => {
+          const defaults = mergeRestaurantCameraDefaults(MONITORING_ZONE_DEFINITIONS, prev);
+          const base = defaults[zoneId];
+          const updated = { ...base, lastConnectionTestAt: nowIso, lastConnectionTestOk: ok };
+          const next = { ...prev, [zoneId]: updated };
+          persistRestaurantCameraConfigs(next);
+          return next;
+        });
+
+        const needsBackendNote =
+          t === RESTAURANT_CONNECTION_TYPES.IP_CAMERA || t === RESTAURANT_CONNECTION_TYPES.RTSP_URL;
+
+        setToast({
+          type: ok ? "success" : "error",
+          text: ok
+            ? needsBackendNote
+              ? "نجح التحقق من الإعدادات. خدمة البث في الخادم مطلوبة للاتصال الفعلي بكاميرات IP/RTSP."
+              : "تم التحقق بنجاح."
+            : "فشل اختبار الاتصال (تأكد من الأذونات أو الإعدادات).",
+        });
+      } finally {
+        setCameraSetupBusy((b) => ({ ...b, test: null }));
+      }
+    },
+    [setToast],
+  );
+
+  const handleStartRestaurantLiveMonitoring = useCallback(
+    async (zoneId) => {
+      const defaults = mergeRestaurantCameraDefaults(MONITORING_ZONE_DEFINITIONS, restaurantCamConfigs);
+      const cfg = defaults[zoneId];
+      const mode = cfg?.connectionType || RESTAURANT_CONNECTION_TYPES.IP_CAMERA;
+
+      if (mode === RESTAURANT_CONNECTION_TYPES.IP_CAMERA || mode === RESTAURANT_CONNECTION_TYPES.RTSP_URL) {
+        setToast({
+          type: "info",
+          text: "تم تجهيز إعدادات RTSP/IP في الواجهة. لتفعيل البث الفعلي يُطلَب تشغيل خدمة البث في الخادم (Backend streaming).",
+        });
+        return;
+      }
+
+      if (mode === RESTAURANT_CONNECTION_TYPES.UPLOADED_VIDEO) {
+        setSelectedMonitoringZoneId(zoneId);
+        setCameraAnalyzeMode("video");
+        window.setTimeout(() => {
+          supervisorMonitoringAiRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 50);
+        setToast({ type: "info", text: "انتقل إلى قسم تحليل الفيديو أدناه لرفع ملف الاختبار." });
+        return;
+      }
+
+      setSelectedMonitoringZoneId(zoneId);
+      await startMonitoringWebcam();
+      setMonitoringLiveAutoOn(true);
+    },
+    [restaurantCamConfigs, setToast, startMonitoringWebcam],
+  );
+
+  const handleStopRestaurantLiveMonitoring = useCallback(
+    (zoneId) => {
+      if (selectedMonitoringZoneId !== zoneId) {
+        setToast({ type: "info", text: "المراقبة المباشرة النشطة مسجَّلة لمنطقة أخرى." });
+        return;
+      }
+      liveGenRef.current += 1;
+      setMonitoringLiveAutoOn(false);
+    },
+    [selectedMonitoringZoneId, setToast],
+  );
+
+  const handleGoUploadedVideoMonitoringSection = useCallback((zoneId) => {
+    setSelectedMonitoringZoneId(zoneId);
+    setCameraAnalyzeMode("video");
+    window.setTimeout(() => {
+      supervisorMonitoringAiRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      try {
+        monitoringWebcamStreamRef.current?.getTracks?.().forEach((t) => t.stop());
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (role !== "staff") return undefined;
+    if (location.pathname === ROUTES.supervisorLegacy || location.pathname === ROUTES.monitoringLegacy) {
+      navigate(ROUTES.dashboard, { replace: true });
+    }
+    return undefined;
+  }, [role, location.pathname, navigate]);
+
+  const monitoringFrameGroups = useMemo(() => {
+    const groups = [];
+    for (const frame of monitoringVideoFrameResults) {
+      const cleanViolations = sortMonitoringViolationsReadable((frame.violations || []).filter((vv) => !vv.aliasOf));
+      const violationKeys = cleanViolations
+        .map((v) => canonicalMonitoringViolationType(v.typeKey || v.type))
+        .filter((k) => k && ALLOWED_MONITORING_VIOLATION_KEYS.has(k));
+      const uniqueKeys = Array.from(new Set(violationKeys));
+      const riskRaw = String(frame?.frameReport?.overall_risk_level || "").toLowerCase();
+      const riskLevel = riskRaw === "high" || riskRaw === "medium" || riskRaw === "low"
+        ? riskRaw
+        : uniqueKeys.length >= 3
+          ? "high"
+          : uniqueKeys.length > 0
+            ? "medium"
+            : "low";
+      const signature = `${uniqueKeys.slice().sort().join("|")}::${riskLevel}::${frame.errorText ? "err" : "ok"}`;
+      const summaryLabel = uniqueKeys.length
+        ? uniqueKeys.map((k) => getViolationLabel(k)).join("، ")
+        : "لا توجد مخالفات";
+
+      const item = {
+        id: frame.id,
+        frameUrl: frame.frameUrl,
+        timeStart: frame.atSecond,
+        timeEnd: frame.atSecond,
+        count: 1,
+        riskLevel,
+        violations: uniqueKeys,
+        summaryLabel,
+        errorText: frame.errorText || "",
+        signature,
+      };
+
+      const prev = groups[groups.length - 1];
+      if (prev && prev.signature === signature && !item.errorText && !prev.errorText) {
+        prev.timeEnd = frame.atSecond;
+        prev.count += 1;
+      } else {
+        groups.push(item);
+      }
+    }
+    return groups;
+  }, [monitoringVideoFrameResults]);
+
+  const filteredMonitoringFrameGroups = useMemo(() => {
+    if (monitoringFrameFilter === "violations") {
+      return monitoringFrameGroups.filter((g) => g.violations.length > 0);
+    }
+    if (monitoringFrameFilter === "high") {
+      return monitoringFrameGroups.filter((g) => g.riskLevel === "high");
+    }
+    return monitoringFrameGroups;
+  }, [monitoringFrameFilter, monitoringFrameGroups]);
+
+  const monitoringSummary = useMemo(() => {
+    const totalFrames = monitoringVideoFrameResults.length;
+    const typeCount = new Map();
+    let totalViolations = 0;
+    let hasHigh = false;
+    let hasMedium = false;
+    monitoringFrameGroups.forEach((g) => {
+      if (g.riskLevel === "high") hasHigh = true;
+      else if (g.riskLevel === "medium") hasMedium = true;
+      g.violations.forEach((k) => {
+        typeCount.set(k, (typeCount.get(k) || 0) + g.count);
+        totalViolations += g.count;
+      });
+    });
+    let topType = "";
+    let topCount = 0;
+    for (const [k, n] of typeCount.entries()) {
+      if (n > topCount) {
+        topType = k;
+        topCount = n;
+      }
+    }
+    const overallRisk = hasHigh ? "high" : hasMedium ? "medium" : "low";
+    return {
+      totalFrames,
+      totalViolations,
+      mostCommon: topType ? getViolationLabel(topType) : "—",
+      overallRisk,
+    };
+  }, [monitoringFrameGroups, monitoringVideoFrameResults.length]);
+
   return (
-    <div className="min-h-screen bg-surface text-slate-100" dir="rtl">
-      {role === "admin" ? (
+    <div
+      className={`min-h-screen bg-surface text-slate-100 ${
+        role === "supervisor" || role === "admin"
+          ? "scroll-pt-28 sm:scroll-pt-32"
+          : "scroll-pt-20 sm:scroll-pt-24"
+      }`}
+      dir="rtl"
+    >
+      {role === "admin" || role === "supervisor" ? (
         <style>
           {`
 @media print {
@@ -2200,7 +3349,12 @@ export default function Dashboard() {
   .ska-dashboard-no-print {
     display: none !important;
   }
-  #ska-violations-report-print {
+  #ska-violations-report-print,
+  #ska-dish-review-report-print {
+    display: none !important;
+  }
+  body.ska-print-violations-only #ska-violations-report-print,
+  body.ska-print-dish-review-only #ska-dish-review-report-print {
     display: block !important;
     position: static !important;
     left: auto !important;
@@ -2210,7 +3364,7 @@ export default function Dashboard() {
     min-height: auto !important;
     box-sizing: border-box !important;
     background: #ffffff !important;
-    color: #000000 !important;
+    color: #0f172a !important;
     direction: rtl !important;
     padding: 10mm !important;
     overflow: visible !important;
@@ -2219,11 +3373,26 @@ export default function Dashboard() {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
-  #ska-violations-report-print * {
-    color: #000000 !important;
+  body.ska-print-violations-only #ska-dish-review-report-print,
+  body.ska-print-dish-review-only #ska-violations-report-print {
+    display: none !important;
   }
-  #ska-violations-report-print table th {
-    background: #f1f5f9 !important;
+  body.ska-print-violations-only #ska-violations-report-print table,
+  body.ska-print-dish-review-only #ska-dish-review-report-print table {
+    table-layout: fixed;
+    width: 100% !important;
+  }
+  body.ska-print-violations-only #ska-violations-report-print table th,
+  body.ska-print-dish-review-only #ska-dish-review-report-print table th {
+    background: #1e3a8a !important;
+    color: #ffffff !important;
+  }
+  body.ska-print-violations-only #ska-violations-report-print .ska-print-section-title,
+  body.ska-print-dish-review-only #ska-dish-review-report-print .ska-print-section-title {
+    background: #bfdbfe !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   @page {
     size: A4 portrait;
@@ -2234,23 +3403,42 @@ export default function Dashboard() {
         </style>
       ) : null}
       <div className="ska-dashboard-no-print">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_70%_40%_at_50%_-10%,rgba(37,99,235,0.12),transparent)]" />
 
       <DashboardNav
         role={role}
         navLinks={navLinks}
-        activeStaffSection={activeStaffSection}
-        activeSection={activeSection}
-        currentHash={location.hash || ""}
         mobileNavOpen={mobileNavOpen}
         setMobileNavOpen={setMobileNavOpen}
         logout={logout}
         dashboardTitle={dashboardTitle}
       />
 
-      <main id="home" className="relative z-10 mx-auto max-w-7xl px-3 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
+      <main
+        id="home"
+        className="relative z-0 mx-auto max-w-7xl px-3 pb-6 pt-14 sm:px-6 sm:pb-8 sm:pt-16 lg:px-8 lg:pb-10"
+      >
+        {(role === "supervisor" || role === "admin") ? (
+          <StickyAnalyticsSummaryBar
+            qualityLabel={executiveQualityLabel}
+            alertsOpenCount={unresolvedAlertsCount}
+            violationsCount={
+              supervisorSummaryLoading
+                ? "…"
+                : supervisorSummary?.violations_count != null
+                  ? supervisorSummary.violations_count
+                  : "—"
+            }
+            systemStatusLabel={alertsError ? "تعذّر تحميل التنبيهات" : monitoringHealthLine}
+            activeCamerasCount={cctvDashboardSummary.activeStreams}
+            loading={supervisorSummaryLoading || alertsLoading}
+          />
+        ) : null}
         {role === "staff" ? (
-          <section className={`${glassCard} mb-6 select-none p-4 sm:mb-8 sm:p-6 lg:p-8`}>
+          <section
+            className={`${staffElevatedCard} mb-6 p-4 sm:mb-8 sm:p-6 lg:p-8`}
+            data-aos="fade-up"
+            data-aos-duration="720"
+          >
             <StaffProfileCard staffProfileLoading={staffProfileLoading} staffMe={staffMe} />
           </section>
         ) : (
@@ -2259,9 +3447,7 @@ export default function Dashboard() {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-brand-sky">نظرة تحليلية</p>
                 <h2 className="mt-1 text-2xl font-bold text-white sm:text-3xl">{dashboardTitle}</h2>
-                <p className="mt-2 max-w-2xl text-sm text-slate-400">
-                  متابعة الجودة، تسجيل المخالفات، وعرض التنبيهات في منصة واحدة
-                </p>
+                <p className="mt-2 max-w-2xl text-sm text-slate-400">{PLATFORM_BRAND.taglineAr}</p>
                 {(role === "supervisor" || role === "admin") && !supervisorSummaryLoading ? (
                   <p className="mt-2 text-sm text-slate-300">
                     {role === "admin" ? (
@@ -2335,7 +3521,11 @@ export default function Dashboard() {
               ref={staffSearchSectionRef}
               className="scroll-mt-28 sm:scroll-mt-32 lg:scroll-mt-36"
             >
-            <article className={`${glassCard} space-y-5 p-4 sm:p-6`}>
+            <article
+              className={`${staffElevatedCard} space-y-6 p-4 sm:space-y-7 sm:p-6`}
+              data-aos="fade-up"
+              data-aos-duration="760"
+            >
               <DishFilters
                 filterSearch={filterSearch}
                 setFilterSearch={setFilterSearch}
@@ -2369,7 +3559,11 @@ export default function Dashboard() {
               ref={staffRecordsSectionRef}
               className="scroll-mt-28 sm:scroll-mt-32 lg:scroll-mt-36"
             >
-            <article className={`${glassCard} space-y-6 p-4 sm:space-y-8 sm:p-6 lg:p-8`}>
+            <article
+              className={`${staffElevatedCard} space-y-6 p-4 sm:space-y-8 sm:p-6 lg:p-8`}
+              data-aos="fade-up"
+              data-aos-duration="760"
+            >
               <RecordsList
                 staffRecords={staffRecords}
                 displayedRecords={displayedRecords}
@@ -2413,27 +3607,37 @@ export default function Dashboard() {
           </section>
         ) : (
           <>
-            <section className={`${glassCard} mb-6 p-4 sm:mb-8 sm:p-6`}>
-              <div className="mb-4 border-b border-white/10 pb-3">
-                <p className="text-xs font-semibold uppercase tracking-wider text-brand-sky">لوحة التحكم</p>
-                <h3 className="mt-1 text-lg font-bold text-white">ملخص الحالة الحالية</h3>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {supervisorHeaderStats.map((item) => (
-                  <article key={item.label} className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-2.5">
-                    <p className="text-[11px] text-slate-500">{item.label}</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-100">{item.value}</p>
-                  </article>
-                ))}
-              </div>
-            </section>
+            <SupervisorExecutiveHero
+              branchLabel={executiveBranchLabel}
+              liveMonitoringLabel={executiveLiveLabel}
+              qualityPercentLabel={executiveQualityLabel}
+            />
 
-            <section id="analytics" ref={supervisorAnalyticsRef} className="mb-8 scroll-mt-28">
-              <div className="mb-3">
-                <h3 className="text-lg font-bold text-white">مؤشرات الأداء</h3>
-                <p className="text-sm text-slate-400">بطاقات سريعة لمتابعة الحالة العامة.</p>
+            <SupervisorSummaryCards
+              cameraCount={cameraCards.length}
+              activeAlertsCount={unresolvedAlertsCount}
+              totalViolations={supervisorSummary?.violations_count}
+              qualityPercent={supervisorSummary?.quality_score ?? supervisorSummary?.compliance_rate}
+              loading={supervisorSummaryLoading || cameraCardsLoading}
+            />
+
+            <SupervisorMonitoringOverview
+              cctvSummary={cctvDashboardSummary}
+              highlights={supervisorBranchHighlights}
+              liveLine={monitoringLiveLine}
+              healthLine={monitoringHealthLine}
+            />
+
+            <section
+              id="analytics"
+              ref={supervisorAnalyticsRef}
+              className={`${SECTION_THEME.quality} mb-10 scroll-mt-28 space-y-8 sm:scroll-mt-32`}
+            >
+              <div className="border-b border-white/10 pb-4">
+                <h3 className="text-lg font-bold tracking-tight text-white">مؤشرات الأداء والتحليلات</h3>
+                <p className="mt-1 text-sm leading-relaxed text-slate-400">{PLATFORM_BRAND.taglineAr}</p>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
               {supervisorCards.map((m) => (
                 <article
                   key={m.label}
@@ -2450,21 +3654,24 @@ export default function Dashboard() {
                 </article>
               ))}
               </div>
-              <div className="mt-6 lg:mt-8">
+              <div className="grid gap-8 lg:grid-cols-2">
+                <SupervisorAnalyticsRecharts loading={supervisorSummaryLoading} supervisorSummary={supervisorSummary} />
                 <SupervisorAnalyticsBars loading={supervisorSummaryLoading} supervisorSummary={supervisorSummary} />
               </div>
             </section>
 
-            <section id="alerts" ref={supervisorAlertsRef} className={`${glassCard} mb-8 p-5`}>
-              <div className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
-                <h3 className="flex items-center gap-2 text-lg font-bold text-white">
+            <section
+              id="alerts"
+              ref={supervisorAlertsRef}
+              className={`${SECTION_THEME.alerts} mb-8 scroll-mt-28 sm:scroll-mt-32`}
+            >
+              <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-4">
+                <h3 className="flex items-center gap-2 text-lg font-bold tracking-tight text-white">
                   <IconBell className="h-5 w-5 text-accent-amber" />
                   آخر التنبيهات
                 </h3>
                 {!alertsLoading && alertsList.length > 0 ? (
-                  <p className="text-xs text-slate-500">
-                    عرض {Math.min(alertsVisibleCount, alertsList.length)} من {alertsList.length}
-                  </p>
+                  <p className="text-xs tabular-nums text-slate-500">{alertsList.length} تنبيهًا في القائمة</p>
                 ) : null}
               </div>
               {alertsLoading ? (
@@ -2478,56 +3685,192 @@ export default function Dashboard() {
                   {alertsError}
                 </div>
               ) : alertsList.length > 0 ? (
-                <ul className="flex flex-col gap-3">
-                  {alertsList.slice(0, alertsVisibleCount).map((a) => (
-                    <li key={a.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-2.5 text-start text-sm">
-                      <p className="font-medium text-slate-200">{a.label_ar || a.details || a.type}</p>
-                      <p className="mt-0.5 text-xs text-slate-400">
-                        {(a.type || "").toString()} · {a.camera_name || "—"} · {a.location || a.branch || "—"}
-                      </p>
-                      <p className="mt-0.5 text-xs text-slate-400">
-                        {displayAiConfidence(a.confidence)} · {formatSaudiDateTime(a.created_at)} ·{" "}
-                        {monitoringAlertStatusAr(a.status)}
-                      </p>
-                      {a.status === "open" ? (
-                        <button
-                          type="button"
-                          disabled={monitoringResolveLoadingId === a.id}
-                          onClick={() => void resolveMonitoringAlert(a.id)}
-                          className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-200 disabled:opacity-50"
-                        >
-                          {monitoringResolveLoadingId === a.id ? "جاري…" : "تمت المعالجة"}
-                        </button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
+                <ExpandMoreList initialVisible={3} listClassName="flex flex-col gap-4">
+                  {alertsList.map((a) => {
+                    const sev = alertSeverityBadgeMeta(a.confidence);
+                    const typeLabel =
+                      String(a.label_ar || "").trim() ||
+                      getViolationLabel(canonicalMonitoringViolationType(a.type));
+                    const st = String(a?.status || "").toLowerCase();
+                    const canResolve = st === "open" || st === "new";
+                    return (
+                      <article
+                        key={a.id}
+                        className={`group rounded-xl border bg-[#0B1327]/80 px-4 py-4 text-start text-sm transition duration-200 hover:-translate-y-px hover:bg-[#0c162e]/92 ${alertWorkflowCardRing(a.status)}`}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-semibold leading-snug text-slate-100">{a.label_ar || a.details || typeLabel}</p>
+                            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+                              نوع المخالفة: <span className="text-slate-300">{typeLabel}</span>
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${alertWorkflowBadgeClass(a.status)}`}
+                            >
+                              {monitoringAlertStatusAr(a.status)}
+                            </span>
+                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sev.cls}`}>
+                              {sev.label}
+                            </span>
+                          </div>
+                        </div>
+                        <dl className="mt-4 grid gap-2 text-[11px] leading-relaxed text-slate-400 sm:grid-cols-2">
+                          <div>
+                            <dt className="text-slate-600">الكاميرا</dt>
+                            <dd className="font-medium text-slate-200">{a.camera_name || "—"}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-600">الفرع / المنطقة</dt>
+                            <dd className="font-medium text-slate-200">
+                              {a.branch_name || a.branch || a.location || "—"}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-600">الوقت</dt>
+                            <dd className="font-mono text-slate-300">{formatSaudiDateTime(a.created_at)}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-slate-600">الثقة</dt>
+                            <dd className="tabular-nums text-slate-200">{displayAiConfidence(a.confidence)}</dd>
+                          </div>
+                        </dl>
+                        {canResolve ? (
+                          <button
+                            type="button"
+                            disabled={monitoringResolveLoadingId === a.id}
+                            onClick={() => void resolveMonitoringAlert(a.id)}
+                            className="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-[11px] font-semibold text-emerald-200 transition hover:bg-emerald-500/15 disabled:opacity-50"
+                          >
+                            {monitoringResolveLoadingId === a.id ? "جاري…" : "تمييز كمعالَج"}
+                          </button>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </ExpandMoreList>
               ) : (
-                <div className="rounded-xl border border-white/10 bg-[#0B1327]/70 px-3 py-6 text-center text-sm text-slate-400">
-                  لا توجد تنبيهات مسجلة
-                </div>
+                <EmptyState
+                  icon="🎉"
+                  title="لا توجد تنبيهات حالية"
+                  hint="عند ظهور مخالفات من المراقبة ستُعرض هنا مع حالة المعالجة والثقة."
+                />
               )}
-              {!alertsLoading && !alertsError && alertsList.length > alertsVisibleCount ? (
-                <div className="mt-4 flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => setAlertsVisibleCount((c) => c + ALERTS_PAGE_STEP)}
-                    className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 hover:text-white"
-                  >
-                    عرض المزيد ({alertsList.length - alertsVisibleCount} متبقية)
-                  </button>
-                </div>
-              ) : null}
             </section>
 
-            <section id="cameras" ref={supervisorCamerasRef} className={`${glassCard} mb-8 p-5`}>
-              <div className="mb-4 border-b border-white/10 pb-3">
-                <h3 className="text-lg font-bold text-white">إدارة الكاميرات والفحص</h3>
+            <section
+              id="cameras"
+              ref={supervisorCamerasRef}
+              className={`${SECTION_THEME.cameras} mb-8 scroll-mt-28 overflow-hidden !p-0 sm:scroll-mt-32`}
+            >
+              <div className="border-b border-white/10 bg-[#020617]/95 px-5 py-4">
+                <h3 className="text-lg font-bold text-white">مراقبة الكاميرات — {PLATFORM_BRAND.nameShortAr}</h3>
                 <p className="mt-1 text-xs text-slate-400">
-                  تسجيل الكاميرات ومراقبة الحالة. أدوات التحليل أدناه للمشرفين المصرّح لهم.
+                  ثلاث مناطق تشغيل ثابتة (CAM-01 … CAM-03). التحليل عبر واجهات API الحالية؛ جاهزة لربط RTSP/IP مع خدمة البث.
                 </p>
               </div>
-              <div className="flex flex-col gap-6">
+
+              <div className="border-b border-white/10 bg-[#0b1224]/95 px-4 py-4 sm:px-5">
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">ملخص المراقبة</p>
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                  <article className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5">
+                    <p className="text-[11px] text-slate-500">إجمالي الكاميرات (مناطق)</p>
+                    <p className="mt-1 text-lg font-bold tabular-nums text-white">{cctvDashboardSummary.totalZones}</p>
+                  </article>
+                  <article className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5">
+                    <p className="text-[11px] text-slate-500">كاميرات بنشاط بث</p>
+                    <p className="mt-1 text-lg font-bold tabular-nums text-emerald-200">{cctvDashboardSummary.activeStreams}</p>
+                  </article>
+                  <article className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5">
+                    <p className="text-[11px] text-slate-500">تنبيهات اليوم</p>
+                    <p className="mt-1 text-lg font-bold tabular-nums text-amber-200">{cctvDashboardSummary.violationsToday}</p>
+                  </article>
+                  <article className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5">
+                    <p className="text-[11px] text-slate-500">أعلى منطقة خطورة اليوم</p>
+                    <p className="mt-1 text-sm font-semibold leading-snug text-red-100">{cctvDashboardSummary.worstZoneLabel}</p>
+                  </article>
+                  <article className="rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 sm:col-span-2 xl:col-span-1">
+                    <p className="text-[11px] text-slate-500">عدد الأفراد (تقديري من النظام)</p>
+                    <p className="mt-1 text-lg font-bold tabular-nums text-sky-100">{cctvDashboardSummary.peopleCount}</p>
+                  </article>
+                </div>
+              </div>
+
+              <div className="grid gap-4 border-b border-white/10 bg-[#030712] px-4 py-5 sm:grid-cols-2 sm:px-5 lg:grid-cols-3">
+                {MONITORING_ZONE_DEFINITIONS.map((zone, idx) => {
+                  const matched = findCameraForZone(zone, cameraCards);
+                  const za = alertsForZone(zone, alertsList);
+                  const openV = za.filter((a) => String(a?.status || "").toLowerCase() !== "resolved").length;
+                  const cfg = mergedRestaurantCamConfigs[zone.id];
+                  const ct = cfg?.connectionType || RESTAURANT_CONNECTION_TYPES.IP_CAMERA;
+                  const ipOrRtsp =
+                    ct === RESTAURANT_CONNECTION_TYPES.IP_CAMERA ||
+                    ct === RESTAURANT_CONNECTION_TYPES.RTSP_URL;
+
+                  const streamConnected = monitoringWebcamOn && selectedMonitoringZoneId === zone.id;
+
+                  const st = liveSlotStates[zone.id];
+                  let riskTier = st?.tier || "neutral";
+                  if (streamConnected && (riskTier === "neutral" || !st?.tier)) riskTier = "green";
+
+                  const connLabel = ipOrRtsp
+                    ? "منقطع — يتطلب خادم بث"
+                    : streamConnected
+                      ? monitoringLiveAutoOn
+                        ? "متصل — تحليل تلقائي"
+                        : "متصل — معاينة"
+                      : "منقطع";
+
+                  const lastTestLabel = cfg?.lastConnectionTestAt
+                    ? `${cfg.lastConnectionTestOk === true ? "✓ " : cfg.lastConnectionTestOk === false ? "✗ " : ""}${formatSaudiDateTime(cfg.lastConnectionTestAt)}`
+                    : "لم يُجرَ اختبار اتصال بعد";
+
+                  const lastAnalysisLabel =
+                    st?.lastAtLabel ||
+                    (matched?.last_analysis_at ? formatSaudiDateTime(matched.last_analysis_at) : "—");
+
+                  const previewRefs = [livePrevKitchenRef, livePrevStorageRef, livePrevPrepRef];
+
+                  return (
+                    <RestaurantCameraCard
+                      key={zone.id}
+                      zone={zone}
+                      config={cfg}
+                      riskTier={riskTier}
+                      connected={streamConnected}
+                      liveAnalyzing={
+                        streamConnected &&
+                        monitoringLiveAutoOn &&
+                        liveTickBusy &&
+                        selectedMonitoringZoneId === zone.id
+                      }
+                      connectionStatusLabel={connLabel}
+                      lastConnectionTestLabel={lastTestLabel}
+                      lastAnalysisLabel={lastAnalysisLabel}
+                      riskLevelLabel={st?.statusLabel || "—"}
+                      activeViolationsCount={openV}
+                      peopleCount={typeof st?.peopleCount === "number" ? st.peopleCount : "—"}
+                      streamPreviewRef={previewRefs[idx]}
+                      onSave={(draft) => void handleRestaurantCameraSave(zone.id, draft)}
+                      onTestConnection={(draft) => void handleRestaurantCameraTest(zone.id, draft)}
+                      onStartLiveMonitoring={() => void handleStartRestaurantLiveMonitoring(zone.id)}
+                      onStopMonitoring={() => handleStopRestaurantLiveMonitoring(zone.id)}
+                      onGoToUploadedVideoTest={() => handleGoUploadedVideoMonitoringSection(zone.id)}
+                      testBusy={cameraSetupBusy.test === zone.id}
+                      saveBusy={cameraSetupBusy.save === zone.id}
+                    />
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-col gap-6 px-4 pb-6 pt-5 sm:px-6">
+                <div className="rounded-xl border border-white/10 bg-[#060d1f]/40 px-4 py-3">
+                  <p className="text-xs font-semibold text-slate-200">تسجيل كاميرا في الخادم (اختياري)</p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    يُستخدم عند ربط الكاميرات بقاعدة البيانات؛ إعدادات IP أعلاه تُحفظ محلياً إلى أن يكتمل التكامل.
+                  </p>
+                </div>
                 <div className="mb-3 grid gap-2 sm:grid-cols-3">
                   <input
                     type="text"
@@ -2561,16 +3904,20 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                <div className="rounded-xl border border-white/10 bg-[#060d1f]/50 p-4">
+                <div
+                  ref={supervisorMonitoringAiRef}
+                  id="supervisor-monitoring-ai"
+                  className="rounded-xl border border-white/10 bg-[#060d1f]/50 p-4"
+                >
                   <p className="mb-2 text-sm font-semibold text-white">مراقبة بالذكاء الاصطناعي</p>
                   <div className="mb-3 rounded-xl border border-sky-500/25 bg-sky-500/5 px-3 py-2 text-[11px] leading-relaxed text-slate-300">
-                    التحليل يتم على الخادم عبر Gemini. إذا ظهرت رسالة فشل، راجع ملف{" "}
-                    <span className="font-mono text-slate-200" dir="ltr">backend/.env</span>:{" "}
-                    <span className="font-mono text-slate-200" dir="ltr">GEMINI_API_KEY</span> و
-                    <span className="font-mono text-slate-200" dir="ltr"> GEMINI_VISION_MODEL</span>
-                    ، أو فعّل للتجربة{" "}
-                    <span className="font-mono text-slate-200" dir="ltr">MONITORING_AI_DEMO_MODE=true</span>.
-                    حقل «الذكاء الاصطناعي» في بطاقة الكاميرة يخص التسجيل فقط ولا يوقف رفع الصورة/الفيديو للتحليل.
+                    التحليل يتم على الخادم عبر YOLO (وليس Gemini للمراقبة). راجع في{" "}
+                    <span className="font-mono text-slate-200" dir="ltr">backend/.env</span>{" "}
+                    <span className="font-mono text-slate-200" dir="ltr">YOLO_MODEL_PATH</span>: الكمامة، القفازات،
+                    غطاء الرأس، الزي، والنظافة (نفايات على الأرض / موقع الحاويات). اختياريًا{" "}
+                    <span className="font-mono text-slate-200" dir="ltr">YOLO_WASTE_MODEL_PATH</span> لنموذج مخصص
+                    للنفايات إن لم تكن الفئات ضمن النموذج الأساسي. لا يُفرض رصد النظارات.
+                    حقل «الذكاء الاصطناعي» في بطاقة الكاميرا يخص التسجيل فقط ولا يوقف رفع الصورة/الفيديو للتحليل.
                   </div>
                   <div className="mb-3 flex flex-wrap gap-2">
                     <button
@@ -2596,6 +3943,21 @@ export default function Dashboard() {
                       تحليل فيديو
                     </button>
                   </div>
+                  <label className="mb-1 block text-xs text-slate-400">منطقة المراقبة (تُرسَل مع التحليل كـ location)</label>
+                  <select
+                    value={selectedMonitoringZoneId}
+                    onChange={(e) => setSelectedMonitoringZoneId(e.target.value)}
+                    className="mb-2 w-full max-w-md rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-sm text-white"
+                  >
+                    {MONITORING_ZONE_DEFINITIONS.map((z) => (
+                      <option key={z.id} value={z.id}>
+                        {z.zoneAr} · {z.camCode}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mb-3 text-[11px] text-slate-500">
+                    الجلسة الحالية: <span className="font-semibold text-slate-300">{selectedZoneMeta.zoneAr}</span>
+                  </p>
                   <label className="mb-2 block text-xs text-slate-400">ربط التحليل بكاميرا مسجلة (اختياري)</label>
                   <select
                     value={monitoringCameraSelectId}
@@ -2706,14 +4068,87 @@ export default function Dashboard() {
                         )}
                       </button>
                     )}
-                    <button
-                      type="button"
-                      disabled
-                      title="TODO: الوضع المستمر لاحقاً — إطار كل 2–3 ثوانٍ"
-                      className="rounded-xl border border-white/15 bg-[#0B1327]/60 px-4 py-2 text-xs text-slate-500"
-                    >
-                      تشغيل الكاميرا المباشرة
-                    </button>
+                  </div>
+                  <div className="mt-4 rounded-xl border border-emerald-500/25 bg-[#041014]/80 p-4">
+                    <p className="mb-2 text-sm font-semibold text-emerald-100">مراقبة مباشرة — كاميرا الجهاز</p>
+                    <p className="mb-3 text-[11px] leading-relaxed text-slate-400">
+                      يبقى البث مفتوحاً طوال الجلسة؛ التحليل التلقائي يرسل إطار JPEG مضغوطاً كل ثانية إلى نفس مسار الخادم.
+                      المعاينة الحالية تُعرض على المناطق الثلاث حتى يُربط لاحقاً بث RTSP/IP منفصل لكل بطاقة دون تغيير الواجهة.
+                    </p>
+                    <LiveMonitoringZoneCards
+                      zones={MONITORING_ZONE_DEFINITIONS}
+                      selectedZoneId={selectedMonitoringZoneId}
+                      onSelectZone={(id) => setSelectedMonitoringZoneId(id)}
+                      slotStates={liveSlotStates}
+                      previewRefs={[livePrevKitchenRef, livePrevStorageRef, livePrevPrepRef]}
+                      liveAutoOn={monitoringLiveAutoOn}
+                      liveTickBusy={liveTickBusy}
+                    />
+                    <p className="mb-2 mt-4 text-[11px] text-slate-500">
+                      المنطقة النشطة للتحليل (تتطابق مع القائمة أعلاه):{" "}
+                      <span className="font-semibold text-slate-300">{selectedZoneMeta.zoneAr}</span>
+                    </p>
+                    <video
+                      ref={monitoringLiveVideoRef}
+                      className="mb-3 max-h-64 w-full rounded-lg border border-white/10 bg-black object-cover"
+                      playsInline
+                      muted
+                      autoPlay
+                    />
+                    <div className="mb-2 flex flex-wrap gap-2">
+                      {!monitoringWebcamOn ? (
+                        <button
+                          type="button"
+                          onClick={() => void startMonitoringWebcam()}
+                          className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-xs font-semibold text-emerald-100 transition hover:bg-emerald-500/25"
+                        >
+                          تشغيل كاميرا الجهاز
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={stopMonitoringWebcam}
+                          className="rounded-xl border border-white/20 bg-[#0B1327]/80 px-4 py-2 text-xs font-semibold text-slate-200"
+                        >
+                          إيقاف الكاميرا
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={!monitoringWebcamOn || monitoringLiveAutoOn}
+                        onClick={() => setMonitoringLiveAutoOn(true)}
+                        className="rounded-xl border border-violet-500/40 bg-violet-500/15 px-4 py-2 text-xs font-semibold text-violet-100 disabled:opacity-40"
+                      >
+                        بدء التحليل المباشر (كل 1 ث)
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!monitoringLiveAutoOn}
+                        onClick={() => {
+                          liveGenRef.current += 1;
+                          setMonitoringLiveAutoOn(false);
+                        }}
+                        className="rounded-xl border border-white/20 bg-[#0B1327]/80 px-4 py-2 text-xs font-semibold text-slate-300 disabled:opacity-40"
+                      >
+                        إيقاف التحليل المباشر
+                      </button>
+                      <button
+                        type="button"
+                        disabled={monitoringAnalyzeLoading || monitoringWebcamBusy || !monitoringWebcamOn}
+                        onClick={() => void analyzeMonitoringWebcamFrame()}
+                        className="rounded-xl border border-brand-sky/40 bg-brand/15 px-4 py-2 text-xs font-semibold text-brand-sky disabled:opacity-50"
+                      >
+                        {monitoringWebcamBusy || monitoringAnalyzeLoading ? "جاري التحليل…" : "تحليل لقطة يدوي"}
+                      </button>
+                    </div>
+                    {monitoringLiveAutoOn && monitoringWebcamOn ? (
+                      <p className="mb-2 text-[11px] text-emerald-200/90">
+                        التحليل التلقائي نشط — لا يُرسل طلباً جديداً حتى يكتمل الطلب السابق (منع التكرار).
+                      </p>
+                    ) : null}
+                    {monitoringWebcamError ? (
+                      <p className="mt-2 text-xs text-red-300">{monitoringWebcamError}</p>
+                    ) : null}
                   </div>
                   {cameraAnalyzeMode === "video" ? (
                     <p className="mt-2 text-[11px] text-slate-500">
@@ -2730,10 +4165,15 @@ export default function Dashboard() {
                   ) : null}
                 </div>
 
-                {cameraAnalyzeMode === "image" && monitoringAnalysisResult && Array.isArray(monitoringAnalysisResult.checks) ? (
+                {monitoringAnalysisResult &&
+                Array.isArray(monitoringAnalysisResult.checks) &&
+                (cameraAnalyzeMode === "image" || monitoringWebcamOn) ? (
                   <div>
                     <div className="mb-2 flex flex-wrap items-center gap-2 gap-y-1">
                       <span className="text-sm font-semibold text-white">نتيجة التحليل</span>
+                      <span className="rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-slate-300">
+                        المنطقة: {selectedZoneMeta.zoneAr}
+                      </span>
                       {monitoringAnalysisResult.provider === "demo" ? (
                         <span className="rounded-full border border-amber-500/35 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100">
                           وضع تجريبي - النتائج غير حقيقية
@@ -2742,6 +4182,15 @@ export default function Dashboard() {
                         <>
                           <span className="rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-100">
                             Gemini Vision
+                          </span>
+                          <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-100">
+                            تحليل حقيقي
+                          </span>
+                        </>
+                      ) : monitoringAnalysisResult.provider === "yolo" ? (
+                        <>
+                          <span className="rounded-full border border-violet-500/35 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-100">
+                            YOLO PPE
                           </span>
                           <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] text-sky-100">
                             تحليل حقيقي
@@ -2767,10 +4216,49 @@ export default function Dashboard() {
                             {(chk.status_ar && String(chk.status_ar).trim()) || monitoringStatusLabelAr(chk.status)} ·{" "}
                             {displayAiConfidence(chk.confidence)}
                           </p>
+                          {chk.key !== "people_count" &&
+                          monitoringAnalysisResult.frame_report &&
+                          typeof monitoringAnalysisResult.frame_report === "object" &&
+                          monitoringAnalysisResult.frame_report.violators_by_check_key &&
+                          typeof monitoringAnalysisResult.frame_report.violators_by_check_key === "object" ? (
+                            <p className="mt-1 text-[11px] font-medium text-slate-200">
+                              عدد المخالفين:{" "}
+                              {Number(monitoringAnalysisResult.frame_report.violators_by_check_key[chk.key]) || 0}
+                            </p>
+                          ) : null}
                           <p className="mt-1 text-[11px] leading-snug text-slate-400">{chk.reason_ar}</p>
                         </article>
                       ))}
                     </div>
+                    {monitoringAnalysisResult.frame_report &&
+                    typeof monitoringAnalysisResult.frame_report === "object" ? (
+                      <div className="mt-4 rounded-xl border border-white/10 bg-[#060d1f]/80 p-4 text-xs text-slate-200">
+                        <p className="text-sm font-semibold text-white">ملخص اللقطة</p>
+                        <p className="mt-2 text-[11px] text-slate-400">
+                          مستوى الخطر:{" "}
+                          <span className="font-semibold text-slate-100">
+                            {monitoringAnalysisResult.frame_report.overall_risk_ar || "—"}
+                          </span>
+                          <span className="mx-1 text-slate-600">·</span>
+                          <span dir="ltr" className="text-slate-500">
+                            {monitoringAnalysisResult.frame_report.analyzed_at || ""}
+                          </span>
+                        </p>
+                        <p className="mt-2 leading-relaxed text-slate-300">
+                          {monitoringAnalysisResult.frame_report.summary_ar ||
+                            monitoringAnalysisResult.summary ||
+                            ""}
+                        </p>
+                        {Array.isArray(monitoringAnalysisResult.frame_report.violation_lines) &&
+                        monitoringAnalysisResult.frame_report.violation_lines.length > 0 ? (
+                          <ul className="mt-3 list-inside list-disc space-y-1 text-slate-200">
+                            {monitoringAnalysisResult.frame_report.violation_lines.map((line, idx) => (
+                              <li key={`fl-${idx}`}>{line}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -2780,55 +4268,125 @@ export default function Dashboard() {
                       <span className="text-sm font-semibold text-white">نتائج تحليل الفيديو</span>
                       <span className="text-xs text-slate-400">تنبيهات محفوظة: {monitoringVideoAlertsCreated}</span>
                     </div>
-                    <div className="mb-3 rounded-xl border border-white/10 bg-[#060d1f]/70 p-3 text-xs text-slate-300">
-                      <p>
-                        عدد اللقطات المحللة: <span className="font-semibold text-slate-100">{monitoringVideoFrameResults.length}</span>
-                      </p>
-                      <p className="mt-1">
-                        أوقات اللقطات:{" "}
-                        <span className="text-slate-100">
-                          {monitoringVideoAnalyzedTimes.length
-                            ? monitoringVideoAnalyzedTimes.map((t) => formatVideoDuration(t)).join("، ")
-                            : "—"}
-                        </span>
-                      </p>
+                    <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                      <article className="rounded-xl border border-white/10 bg-[#060d1f]/70 p-3">
+                        <p className="text-[11px] text-slate-400">إجمالي اللقطات</p>
+                        <p className="mt-1 text-lg font-bold text-white">{monitoringSummary.totalFrames}</p>
+                      </article>
+                      <article className="rounded-xl border border-white/10 bg-[#060d1f]/70 p-3">
+                        <p className="text-[11px] text-slate-400">إجمالي المخالفات</p>
+                        <p className="mt-1 text-lg font-bold text-white">{monitoringSummary.totalViolations}</p>
+                      </article>
+                      <article className="rounded-xl border border-white/10 bg-[#060d1f]/70 p-3">
+                        <p className="text-[11px] text-slate-400">الأكثر تكرارًا</p>
+                        <p className="mt-1 text-sm font-semibold text-slate-100">{monitoringSummary.mostCommon}</p>
+                      </article>
+                      <article className="rounded-xl border border-white/10 bg-[#060d1f]/70 p-3">
+                        <p className="text-[11px] text-slate-400">مستوى الخطر العام</p>
+                        <p
+                          className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                            MONITORING_RISK_META[monitoringSummary.overallRisk]?.chip || MONITORING_RISK_META.low.chip
+                          }`}
+                        >
+                          {MONITORING_RISK_META[monitoringSummary.overallRisk]?.label || MONITORING_RISK_META.low.label}
+                        </p>
+                      </article>
                     </div>
 
-                    {import.meta.env.DEV ? (
-                      <div className="mb-3 rounded-xl border border-amber-500/35 bg-amber-500/10 p-3 text-xs text-amber-100">
-                        <p>ملخص تطوير: endpoint = {MONITORING_ANALYZE_URL}</p>
-                        <p className="mt-1">frames sent = {monitoringVideoFrameResults.length}</p>
-                        <p className="mt-1">raw violation count = {monitoringVideoRawViolationCount}</p>
-                      </div>
-                    ) : null}
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMonitoringFrameFilter("all")}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                          monitoringFrameFilter === "all"
+                            ? "border-brand-sky/45 bg-brand/20 text-sky-100"
+                            : "border-white/15 bg-[#0B1327]/60 text-slate-300"
+                        }`}
+                      >
+                        كل اللقطات
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMonitoringFrameFilter("violations")}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                          monitoringFrameFilter === "violations"
+                            ? "border-orange-500/45 bg-orange-500/15 text-orange-100"
+                            : "border-white/15 bg-[#0B1327]/60 text-slate-300"
+                        }`}
+                      >
+                        لقطات فيها مخالفات
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMonitoringFrameFilter("high")}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                          monitoringFrameFilter === "high"
+                            ? "border-red-500/45 bg-red-500/15 text-red-100"
+                            : "border-white/15 bg-[#0B1327]/60 text-slate-300"
+                        }`}
+                      >
+                        عالية الخطورة
+                      </button>
+                    </div>
 
                     {monitoringVideoFrameResults.length > 0 ? (
                       <div className="mb-4">
                         <p className="mb-2 text-xs font-semibold text-slate-300">نتيجة كل لقطة</p>
                         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                          {monitoringVideoFrameResults.map((frame) => (
-                            <article key={frame.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 p-3 text-xs text-slate-200">
-                              {frame.frameUrl ? (
-                                <img src={frame.frameUrl} alt="" className="mb-2 h-24 w-full rounded-lg object-cover" />
-                              ) : null}
-                              <p className="text-slate-400">
-                                الوقت: <span className="text-slate-100">{formatVideoDuration(frame.atSecond)}</span>
-                              </p>
-                              {frame.errorText ? (
-                                <p className="mt-1 text-red-200">{frame.errorText}</p>
-                              ) : frame.violations.length === 0 ? (
-                                <p className="mt-1 text-emerald-200">لا توجد مخالفة</p>
-                              ) : (
-                                <div className="mt-1 space-y-1">
-                                  {frame.violations.map((v) => (
-                                    <p key={v.id}>
-                                      <span className="text-slate-100">{v.type}</span> · {displayAiConfidence(v.confidence)}
-                                    </p>
-                                  ))}
+                          {filteredMonitoringFrameGroups.map((frame) => {
+                            const riskMeta = MONITORING_RISK_META[frame.riskLevel] || MONITORING_RISK_META.low;
+                            return (
+                              <article
+                                key={frame.id}
+                                className={`rounded-xl border p-3 text-xs ${
+                                  frame.violations.length > 0
+                                    ? "border-white/10 bg-[#0B1327]/75 text-slate-200"
+                                    : "border-white/10 bg-[#0B1327]/45 text-slate-300 opacity-80"
+                                }`}
+                              >
+                                {frame.frameUrl ? (
+                                  <img
+                                    src={frame.frameUrl}
+                                    alt=""
+                                    className={`mb-2 w-full rounded-lg object-cover ${
+                                      frame.violations.length > 0 ? "h-24" : "h-16"
+                                    }`}
+                                  />
+                                ) : null}
+                                <div className="mb-1 flex items-center justify-between gap-2">
+                                  <p className="text-slate-400">
+                                    الوقت:{" "}
+                                    <span className="text-slate-100">
+                                      {formatVideoDuration(frame.timeStart)}
+                                      {frame.count > 1 ? ` - ${formatVideoDuration(frame.timeEnd)}` : ""}
+                                    </span>
+                                  </p>
+                                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${riskMeta.chip}`}>
+                                    {riskMeta.label}
+                                  </span>
                                 </div>
-                              )}
-                            </article>
-                          ))}
+                                {frame.errorText ? (
+                                  <p className="mt-1 text-red-200">{frame.errorText}</p>
+                                ) : frame.violations.length === 0 ? (
+                                  <p className="mt-1 text-emerald-200">🟢 لا توجد مخالفات</p>
+                                ) : (
+                                  <div className="mt-2 flex flex-wrap gap-1.5">
+                                    {frame.violations.map((typeKey) => {
+                                      const chip = monitoringViolationChipMeta(typeKey);
+                                      return (
+                                        <span key={`${frame.id}-${typeKey}`} className={`rounded-full border px-2 py-1 text-[11px] ${chip.cls}`}>
+                                          {chip.label}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {frame.count > 1 ? (
+                                  <p className="mt-2 text-[11px] text-slate-500">حالة متكررة في {frame.count} لقطات متتالية</p>
+                                ) : null}
+                              </article>
+                            );
+                          })}
                         </div>
                       </div>
                     ) : null}
@@ -2843,32 +4401,7 @@ export default function Dashboard() {
                           تم تحليل اللقطات — لا توجد مخالفات مكتشفة.
                         </div>
                       ) : null
-                    ) : (
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                        {monitoringVideoResults.map((v) => (
-                          <article key={v.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 p-3 text-xs text-slate-200">
-                            <p className="font-semibold text-white">{v.type}</p>
-                            <p className="mt-1 text-slate-400">
-                              الوقت داخل الفيديو: <span className="text-slate-200">{formatVideoDuration(v.atSecond)}</span>
-                            </p>
-                            <p className="mt-1 text-slate-400">
-                              الثقة: <span className="text-slate-200">{displayAiConfidence(v.confidence)}</span>
-                            </p>
-                            <p className="mt-1 text-slate-400">
-                              الحالة: <span className="text-slate-200">{monitoringAlertStatusAr(v.status)}</span>
-                            </p>
-                            {v.reason ? <p className="mt-1 text-[11px] text-slate-400">{v.reason}</p> : null}
-                            {monitoringVideoFrameResults.find((f) => f.id === v.frameId)?.frameUrl ? (
-                              <img
-                                src={monitoringVideoFrameResults.find((f) => f.id === v.frameId)?.frameUrl}
-                                alt=""
-                                className="mt-2 h-28 w-full rounded-lg object-cover"
-                              />
-                            ) : null}
-                          </article>
-                        ))}
-                      </div>
-                    )}
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -2880,9 +4413,11 @@ export default function Dashboard() {
                 ) : cameraCardsError ? (
                   <p className="rounded-xl border border-accent-red/35 bg-accent-red/10 px-3 py-4 text-sm text-red-200">{cameraCardsError}</p>
                 ) : cameraCards.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/50 px-3 py-6 text-center text-sm text-slate-400">
-                    لا يوجد بث مباشر متصل حاليًا
-                  </p>
+                  <EmptyState
+                    icon="📹"
+                    title="لم يتم ربط أي كاميرا بعد"
+                    hint="سجِّل الكاميرات من الخادم أو اضبط مناطق المراقبة أعلاه."
+                  />
                 ) : (
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-slate-400">حالة الكاميرات</p>
@@ -2891,36 +4426,38 @@ export default function Dashboard() {
                         لا يوجد بث مباشر متصل حاليًا
                       </div>
                     )}
-                    {cameraCards.map((c) => (
-                      <article
-                        key={c.id}
-                        className="rounded-xl border border-white/10 bg-gradient-to-br from-[#0B1327]/90 to-[#060d1f]/80 p-4 text-xs text-slate-200 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-white/5 pb-2">
-                          <p className="text-sm font-semibold text-white">{c.name}</p>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                              c.is_connected ? "bg-emerald-500/15 text-emerald-200" : "bg-slate-600/30 text-slate-400"
-                            }`}
-                          >
-                            {c.is_connected ? "متصل" : "غير متصل"}
-                          </span>
-                        </div>
-                        <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
-                          <p>
-                            <span className="text-slate-500">الموقع:</span> {c.location}
-                          </p>
-                          <p>
-                            <span className="text-slate-500">الذكاء الاصطناعي:</span>{" "}
-                            {c.ai_enabled ? "مفعّل" : "غير مفعّل"}
-                          </p>
-                          <p className="sm:col-span-2">
-                            <span className="text-slate-500">آخر تحليل:</span>{" "}
-                            {c.last_analysis_at ? formatSaudiDateTime(c.last_analysis_at) : "لا يوجد"}
-                          </p>
-                        </div>
-                      </article>
-                    ))}
+                    <ExpandMoreList initialVisible={3} listClassName="space-y-2">
+                      {cameraCards.map((c) => (
+                        <article
+                          key={c.id}
+                          className="rounded-xl border border-white/10 bg-gradient-to-br from-[#0B1327]/90 to-[#060d1f]/80 p-4 text-xs text-slate-200 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)] transition hover:border-sky-500/25"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-white/5 pb-2">
+                            <p className="text-sm font-semibold text-white">{c.name}</p>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                c.is_connected ? "bg-emerald-500/15 text-emerald-200" : "bg-slate-600/30 text-slate-400"
+                              }`}
+                            >
+                              {c.is_connected ? "🟢 متصل" : "🔴 غير متصل"}
+                            </span>
+                          </div>
+                          <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+                            <p>
+                              <span className="text-slate-500">الموقع:</span> {c.location}
+                            </p>
+                            <p>
+                              <span className="text-slate-500">الذكاء الاصطناعي:</span>{" "}
+                              {c.ai_enabled ? "مفعّل" : "غير مفعّل"}
+                            </p>
+                            <p className="sm:col-span-2">
+                              <span className="text-slate-500">آخر تحليل:</span>{" "}
+                              {c.last_analysis_at ? formatSaudiDateTime(c.last_analysis_at) : "لا يوجد"}
+                            </p>
+                          </div>
+                        </article>
+                      ))}
+                    </ExpandMoreList>
                   </div>
                 )}
               </div>
@@ -2963,7 +4500,11 @@ export default function Dashboard() {
               )}
             </section>
 
-            <section id="reports" ref={supervisorReportsRef} className={`${glassCard} mb-8 p-5`}>
+            <section
+              id="reports"
+              ref={supervisorReportsRef}
+              className={`${SECTION_THEME.reports} mb-8 scroll-mt-28 sm:scroll-mt-32`}
+            >
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
                 <div>
                   <h3 className="text-lg font-bold text-white">التقارير</h3>
@@ -3021,13 +4562,18 @@ export default function Dashboard() {
                       لا توجد بيانات كافية للتقارير. تأكد من اتصال الخادم أو من صلاحيات المشرف.
                     </div>
                   )}
-              {role === "admin" ? (
+              {(role === "supervisor" || role === "admin") ? (
                 <div className="mt-8 border-t border-white/10 pt-6">
                   <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                     <div>
                       <h4 className="text-base font-bold text-white">تقرير مخالفات المراقبة</h4>
                       <p className="mt-1 text-xs text-slate-400">
                         بيانات من تنبيهات المراقبة المحفوظة في النظام (حتى 500 سجلًا لكل استعلام).
+                        {role === "supervisor" ? (
+                          <span className="mt-1 block text-[11px] text-slate-500">
+                            يعرض المشرف بيانات فرعه المرتبطة بحسابه فقط.
+                          </span>
+                        ) : null}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -3095,6 +4641,20 @@ export default function Dashboard() {
                       </p>
                     </div>
                   </div>
+
+                  <div className="mb-6 rounded-2xl border border-white/10 bg-[#050c1c]/90 p-4">
+                    <h4 className="mb-1 text-sm font-bold text-white">الرسوم التحليلية</h4>
+                    <p className="mb-4 text-[11px] text-slate-500">
+                      تُستخرَج من بيانات الخادم والفلاتر أعلاه؛ لا توجد بيانات وهمية.
+                    </p>
+                    <ReportsAnalyticsCharts
+                      violationsRows={violationsReportRows}
+                      reviewRecords={reviewRecords}
+                      dateFrom={violationsReportFrom}
+                      dateTo={violationsReportTo}
+                    />
+                  </div>
+
                   {violationsReportError ? (
                     <div className="mb-4 rounded-xl border border-accent-red/35 bg-accent-red/10 px-3 py-3 text-sm text-red-200">
                       {violationsReportError}
@@ -3107,9 +4667,11 @@ export default function Dashboard() {
                       ))}
                     </div>
                   ) : violationsReportStats.total === 0 ? (
-                    <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/50 px-4 py-10 text-center text-sm text-slate-400">
-                      لا توجد مخالفات مسجّلة في النطاق الحالي.
-                    </div>
+                    <EmptyState
+                      icon="📊"
+                      title="لا توجد بيانات تقارير للفترة الحالية"
+                      hint="جرّب توسيع نطاق التاريخ أو إظهار الكل من أزرار التصفية أعلاه."
+                    />
                   ) : (
                     <>
                       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -3119,7 +4681,7 @@ export default function Dashboard() {
                         </div>
                         <div className="rounded-xl border border-white/10 bg-[#020617]/70 p-4">
                           <p className="text-xs text-slate-500">مفتوح</p>
-                          <p className="mt-1 text-2xl font-bold tabular-nums text-amber-200">
+                          <p className="mt-1 text-2xl font-bold tabular-nums text-red-200">
                             {violationsReportStats.openCount}
                           </p>
                         </div>
@@ -3172,14 +4734,14 @@ export default function Dashboard() {
                           <ul className="space-y-3 text-sm">
                             <li className="flex items-center justify-between gap-2">
                               <span className="text-slate-400">مفتوح</span>
-                              <span className="tabular-nums font-bold text-amber-200">
+                              <span className="tabular-nums font-bold text-red-200">
                                 {violationsReportStats.openCount}
                               </span>
                             </li>
                             <li>
                               <div className="h-2 overflow-hidden rounded-full bg-[#020617]">
                                 <div
-                                  className="h-full rounded-full bg-amber-500/70 transition-all"
+                                  className="h-full rounded-full bg-red-500/70 transition-all"
                                   style={{
                                     width: `${violationsReportStats.total ? Math.round((violationsReportStats.openCount / violationsReportStats.total) * 100) : 0}%`,
                                   }}
@@ -3220,10 +4782,10 @@ export default function Dashboard() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5 text-slate-200">
-                              {violationsReportStats.latest.map((row) => (
+                              {violationsReportStats.latest.slice(0, violationsLatestExpand.limit).map((row) => (
                                 <tr key={row.id} className="bg-[#060d1f]/40">
                                   <td className="px-3 py-2 font-medium text-white">
-                                    {violationReportTypeLabel(row.type) || row.label_ar || row.type || "—"}
+                                    {row.label_ar?.trim() || getViolationLabel(row.type)}
                                   </td>
                                   <td className="max-w-[14rem] truncate px-3 py-2 text-slate-400" title={row.details}>
                                     {row.details || "—"}
@@ -3236,6 +4798,17 @@ export default function Dashboard() {
                               ))}
                             </tbody>
                           </table>
+                          {violationsLatestExpand.hasMore ? (
+                            <div className="flex justify-center border-t border-white/10 bg-[#060d1f]/30 py-3">
+                              <button
+                                type="button"
+                                onClick={() => violationsLatestExpand.toggle()}
+                                className="rounded-xl border border-white/15 bg-[#0B1327]/85 px-5 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 hover:text-white"
+                              >
+                                {violationsLatestExpand.expanded ? "عرض أقل ↑" : "عرض المزيد ↓"}
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </>
@@ -3244,7 +4817,11 @@ export default function Dashboard() {
               ) : null}
             </section>
 
-            <section id="dish-reviews" ref={supervisorReviewsRef} className={`${glassCard} mb-8 p-5`}>
+            <section
+              id="dish-reviews"
+              ref={supervisorReviewsRef}
+              className={`${SECTION_THEME.neutral} mb-8 scroll-mt-28 sm:scroll-mt-32`}
+            >
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-bold text-white">مراجعة الأطباق</h3>
@@ -3258,6 +4835,15 @@ export default function Dashboard() {
                     className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     تصدير CSV ({reviewRecords.length})
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!reviewRecords.length}
+                    onClick={() => printDishReviewReportPdf()}
+                    title="طباعة أو حفظ PDF عبر نافذة المتصفح (اختر «حفظ كملف PDF»)"
+                    className="rounded-xl border border-white/15 bg-[#0B1327]/80 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    تصدير PDF
                   </button>
                   <button
                     type="button"
@@ -3378,19 +4964,26 @@ export default function Dashboard() {
                   ))}
                 </div>
               ) : reviewRecords.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/60 px-3 py-8 text-center text-sm text-slate-400">
-                  {reviewFiltersAreActive
-                    ? "لا توجد سجلات تطابق الفلاتر الحالية. جرّب توسيع نطاق البحث أو تغيير حالة المراجعة."
-                    : "لا توجد سجلات ضمن العرض الافتراضي (يحتاج مراجعة) حالياً."}
-                </div>
+                <EmptyState
+                  icon="🍽️"
+                  title={
+                    reviewFiltersAreActive
+                      ? "لا توجد سجلات تطابق الفلاتر الحالية"
+                      : "لا توجد سجلات مراجعة في العرض الحالي"
+                  }
+                  hint={
+                    reviewFiltersAreActive
+                      ? "جرّب توسيع نطاق البحث أو تغيير حالة المراجعة."
+                      : "عادة ما تظهر هنا الأطباق التي تحتاج مراجعة فور تسجيلها من الموظفين."
+                  }
+                />
               ) : (
                 <div className="space-y-4">
-                  {reviewTotalPages > 1 ? (
-                    <p className="text-center text-xs text-slate-500">
-                      عرض الصفحة {reviewPage} من {reviewTotalPages} · إجمالي {reviewRecords.length} سجلًا
-                    </p>
-                  ) : null}
-                  {pagedReviewRecords.map((r) => {
+                  <p className="text-center text-[11px] tabular-nums text-slate-500">
+                    إجمالي {reviewRecords.length} سجلًا
+                  </p>
+                  <ExpandMoreList initialVisible={3} listClassName="space-y-4">
+                  {reviewRecords.map((r) => {
                     const conf = Number(r.ai_confidence);
                     const confText = displayAiConfidence(conf);
                     const badge =
@@ -3491,37 +5084,16 @@ export default function Dashboard() {
                       </article>
                     );
                   })}
-                  {reviewTotalPages > 1 ? (
-                    <nav
-                      className="flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-4"
-                      aria-label="ترقيم صفحات المراجعة"
-                    >
-                      <button
-                        type="button"
-                        disabled={reviewPage <= 1}
-                        onClick={() => setReviewPage((p) => Math.max(1, p - 1))}
-                        className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        السابق
-                      </button>
-                      <span className="text-xs tabular-nums text-slate-500">
-                        {reviewPage} / {reviewTotalPages}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={reviewPage >= reviewTotalPages}
-                        onClick={() => setReviewPage((p) => Math.min(reviewTotalPages, p + 1))}
-                        className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        التالي
-                      </button>
-                    </nav>
-                  ) : null}
+                  </ExpandMoreList>
                 </div>
               )}
             </section>
 
-            <section id="employees" ref={supervisorEmployeesRef} className={`${glassCard} mb-8 p-5`}>
+            <section
+              id="employees"
+              ref={supervisorEmployeesRef}
+              className={`${SECTION_THEME.neutral} mb-8 scroll-mt-28 sm:scroll-mt-32`}
+            >
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-bold text-white">الموظفين</h3>
@@ -3577,36 +5149,44 @@ export default function Dashboard() {
                   ))}
                 </div>
               ) : supervisorEmployees.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-white/15 bg-[#0B1327]/60 px-3 py-8 text-center text-sm text-slate-400">
-                  {employeeFiltersAreActive
-                    ? "لا يوجد موظفون يطابقون الفلاتر الحالية."
-                    : "لا توجد بيانات موظفين من الخادم حتى الآن."}
-                </div>
+                <EmptyState
+                  icon="👥"
+                  title={
+                    employeeFiltersAreActive
+                      ? "لا يوجد موظفون يطابقون الفلاتر"
+                      : "لا توجد بيانات موظفين بعد"
+                  }
+                  hint={
+                    employeeFiltersAreActive
+                      ? "عدّل معايير البحث أو أزل الفلاتر النشطة."
+                      : "سيُعبَأ هذا القسم تلقائيًا عند توفر موظفين مسجلين من الخادم."
+                  }
+                />
               ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {employeeTotalPages > 1 ? (
-                    <p className="col-span-full text-center text-xs text-slate-500">
-                      عرض {(employeePage - 1) * EMPLOYEE_PAGE_SIZE + 1}–
-                      {Math.min(employeePage * EMPLOYEE_PAGE_SIZE, supervisorEmployees.length)} من{" "}
-                      {supervisorEmployees.length}
-                    </p>
-                  ) : null}
-                  {pagedSupervisorEmployees.map((e) => (
-                    <article key={e.id} className="rounded-xl border border-white/10 bg-[#0B1327]/70 p-3">
-                      <p className="font-semibold text-white">
+                <ExpandMoreList
+                  initialVisible={3}
+                  listClassName="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+                >
+                  {supervisorEmployees.map((e) => (
+                    <article key={e.id} className="rounded-2xl border border-white/10 bg-[linear-gradient(145deg,#071224,#0b1731)] p-4 shadow-[0_10px_22px_-18px_rgba(59,130,246,0.8)] transition hover:border-white/18">
+                      <div className="mb-2 flex items-start justify-between gap-2">
+                        <p className="font-semibold text-white">
                         {e.full_name || e.username}
                         <span className="ms-2 text-xs font-normal text-slate-400">
                           ({e.branch_name?.trim() ? e.branch_name : "—"})
                         </span>
-                      </p>
+                        </p>
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${e.status === "نشط" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-white/15 bg-white/5 text-slate-400"}`}>
+                          {e.status || "غير معروف"}
+                        </span>
+                      </div>
                       <p className="mt-1 text-xs text-slate-400" dir="ltr">{e.email}</p>
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-300">
                         <p>الدور: <span className="text-white">{roleAr(e.role)}</span></p>
-                        <p>اليوم: <span className="text-white">{e.dishes_today}</span></p>
-                        <p>الإجمالي: <span className="text-white">{e.total_dishes}</span></p>
-                        <p>معلّق: <span className="text-white">{e.pending_reviews}</span></p>
+                        <p>سجلات اليوم: <span className="text-white">{e.dishes_today ?? "لا توجد بيانات كافية"}</span></p>
+                        <p>إجمالي السجلات: <span className="text-white">{e.total_dishes ?? "لا توجد بيانات كافية"}</span></p>
+                        <p>مراجعات معلّقة: <span className="text-white">{e.pending_reviews ?? "لا توجد بيانات كافية"}</span></p>
                         <p className="col-span-2">آخر نشاط: <span className="text-white">{e.last_activity ? formatSaudiDateTime(e.last_activity) : "لا توجد بيانات كافية"}</span></p>
-                        <p className="col-span-2">الحالة: <span className={`${e.status === "نشط" ? "text-emerald-300" : "text-slate-400"}`}>{e.status}</span></p>
                         <button
                           type="button"
                           onClick={() => {
@@ -3620,60 +5200,16 @@ export default function Dashboard() {
                       </div>
                     </article>
                   ))}
-                  {employeeTotalPages > 1 ? (
-                    <nav
-                      className="col-span-full flex flex-wrap items-center justify-center gap-2 border-t border-white/10 pt-4"
-                      aria-label="ترقيم صفحات الموظفين"
-                    >
-                      <button
-                        type="button"
-                        disabled={employeePage <= 1}
-                        onClick={() => setEmployeePage((p) => Math.max(1, p - 1))}
-                        className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        السابق
-                      </button>
-                      <span className="text-xs tabular-nums text-slate-500">
-                        {employeePage} / {employeeTotalPages}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={employeePage >= employeeTotalPages}
-                        onClick={() => setEmployeePage((p) => Math.min(employeeTotalPages, p + 1))}
-                        className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        التالي
-                      </button>
-                    </nav>
-                  ) : null}
-                </div>
+                </ExpandMoreList>
               )}
             </section>
 
             {role === "admin" ? (
-              <section id="users" className={`${glassCard} mt-6`}>
-                <h3 className="mb-2 text-lg font-bold text-white">إدارة المستخدمين</h3>
-                <p className="text-sm text-slate-400">
-                  يمكنك من هذه اللوحة إدارة حسابات staff/supervisor/admin.
-                </p>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <Link
-                    to="/admin/users"
-                    className="inline-flex rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-brand/35 transition hover:bg-blue-600"
-                  >
-                    فتح إدارة المستخدمين
-                  </Link>
-                  <Link
-                    to="/admin/requests"
-                    className="inline-flex rounded-xl border border-white/15 bg-[rgba(15,23,42,0.72)] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-brand-sky/40 hover:bg-[#1a2644]"
-                  >
-                    طلبات الحساب الإداري
-                  </Link>
-                </div>
-              </section>
-            ) : null}
-
-            <section id="settings" ref={supervisorSettingsRef} className={`${glassCard} mt-6`}>
+            <section
+              id="settings"
+              ref={supervisorSettingsRef}
+              className={`${glassCard} mt-6 scroll-mt-28 sm:scroll-mt-32`}
+            >
               <div className="mb-4 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
                 <div>
                   <h3 className="text-lg font-bold text-white">إعدادات النظام</h3>
@@ -3707,7 +5243,9 @@ export default function Dashboard() {
               ) : (
                 <div className="space-y-5">
                   <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
-                    <h4 className="text-sm font-semibold text-white">إعدادات الذكاء الاصطناعي</h4>
+                    <h4 className="text-sm font-semibold text-white">
+                      أ — إعدادات الذكاء الاصطناعي
+                    </h4>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
                         <span className="text-xs text-slate-400">الحد الأدنى للثقة</span>
@@ -3776,7 +5314,26 @@ export default function Dashboard() {
                   </article>
 
                   <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
-                    <h4 className="text-sm font-semibold text-white">إعدادات التنبيهات</h4>
+                    <h4 className="text-sm font-semibold text-white">ب — إعدادات الكاميرات</h4>
+                    <p className="mt-2 text-xs leading-relaxed text-slate-400">
+                      تهيئة كاميرات IP و RTSP والمعاينة تتم من قسم «الكاميرات». كلمات المرور لا تُعرض بعد الحفظ، وتُخزَّن
+                      مؤقتاً على المتصفح إلى أن يُفعَّل التخزين في الخادم.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate(ROUTES.cameras);
+                      }}
+                      className="mt-3 rounded-xl border border-brand-sky/35 bg-brand/15 px-4 py-2 text-xs font-semibold text-sky-100 transition hover:bg-brand/25"
+                    >
+                      فتح إعدادات الكاميرات
+                    </button>
+                  </article>
+
+                  <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
+                    <h4 className="text-sm font-semibold text-white">
+                      ج — إعدادات التنبيهات
+                    </h4>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="flex items-center justify-between rounded-xl border border-white/10 bg-[#060d1f]/80 px-3 py-2 text-sm text-slate-200">
                         <span>تفعيل التنبيهات محلياً</span>
@@ -3822,7 +5379,9 @@ export default function Dashboard() {
                   </article>
 
                   <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
-                    <h4 className="text-sm font-semibold text-white">إعدادات التقارير</h4>
+                    <h4 className="text-sm font-semibold text-white">
+                      د — إعدادات التقارير
+                    </h4>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <button
                         type="button"
@@ -3856,7 +5415,9 @@ export default function Dashboard() {
                   </article>
 
                   <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
-                    <h4 className="text-sm font-semibold text-white">إعدادات النظام</h4>
+                    <h4 className="text-sm font-semibold text-white">
+                      هـ — إعدادات النظام العامة
+                    </h4>
                     <div className="mt-3 grid gap-3 sm:grid-cols-3">
                       <label className="rounded-xl border border-white/10 bg-[#060d1f]/80 p-3">
                         <span className="text-xs text-slate-400">اسم المنصة المعروض</span>
@@ -3892,9 +5453,29 @@ export default function Dashboard() {
                       </label>
                     </div>
                   </article>
+
+                  <article className="rounded-2xl border border-white/10 bg-[#0B1327]/70 p-4">
+                    <h4 className="text-sm font-semibold text-white">و — إدارة المستخدمين</h4>
+                    <p className="mt-2 text-xs text-slate-400">إنشاء وتعديل حسابات الموظفين والمشرفين والمدراء.</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Link
+                        to="/admin/users"
+                        className="inline-flex rounded-xl border border-brand-sky/40 bg-brand/15 px-4 py-2 text-xs font-semibold text-sky-100 transition hover:bg-brand/25"
+                      >
+                        المستخدمون
+                      </Link>
+                      <Link
+                        to="/admin/requests"
+                        className="inline-flex rounded-xl border border-white/15 bg-[#0B1327]/80 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-brand-sky/35"
+                      >
+                        طلبات الحساب الإداري
+                      </Link>
+                    </div>
+                  </article>
                 </div>
               )}
             </section>
+            ) : null}
           </>
         )}
 
@@ -4013,7 +5594,7 @@ export default function Dashboard() {
         ) : null}
       </main>
       </div>
-      {role === "admin" && violationsReportStats.total > 0 ? (
+      {(role === "supervisor" || role === "admin") && violationsReportStats.total > 0 ? (
         <div
           id="ska-violations-report-print"
           dir="rtl"
@@ -4027,36 +5608,49 @@ export default function Dashboard() {
           }}
           aria-hidden
         >
-          <header className="mb-4 border-b border-slate-300 pb-3">
-            <h1 className="text-xl font-bold text-slate-900">تقرير مخالفات المراقبة</h1>
+          <header className="mb-4 border-b-2 border-slate-300 pb-3">
+            <p className="text-xs font-semibold text-[#1e3a8a]">{REPORT_PLATFORM_TITLE_AR}</p>
+            <p className="text-[11px] leading-relaxed text-slate-600">{REPORT_PLATFORM_TAGLINE_AR}</p>
+            <h1 className="mt-3 text-xl font-bold text-slate-900">تقرير مخالفات المراقبة</h1>
             <p className="mt-1 text-xs text-slate-600">
-              وقت التصدير: {formatSaudiDateTime(new Date())}
+              تاريخ التصدير: {formatSaudiDateTime(new Date())}
             </p>
             <p className="mt-1 text-xs text-slate-600">
-              نطاق التواريخ في التقرير: من {violationsReportFrom?.trim() || "—"} إلى{" "}
+              الفرع: {String(supervisorSummary?.branch_name || "").trim() || "—"}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              الفترة الزمنية للمخالفات: من {violationsReportFrom?.trim() || "—"} إلى{" "}
               {violationsReportTo?.trim() || "—"}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              الفترة الزمنية لتحليل الأطباق (عدد السجلات):{" "}
+              {formatReportPeriodLabel(violationsReportFrom, violationsReportTo)}
             </p>
           </header>
           <section className="mb-5">
-            <h2 className="mb-2 text-sm font-semibold text-slate-900">ملخص</h2>
+            <h2 className="ska-print-section-title mb-2 rounded-md px-2 py-1.5 text-sm font-bold text-slate-900">
+              ملخص
+            </h2>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <div className="rounded-lg border border-slate-200 p-3">
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
                 <p className="text-[11px] text-slate-500">إجمالي المخالفات</p>
-                <p className="text-lg font-bold text-slate-900">{violationsReportStats.total}</p>
+                <p className="text-lg font-bold tabular-nums text-slate-900">{violationsReportStats.total}</p>
               </div>
-              <div className="rounded-lg border border-slate-200 p-3">
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
                 <p className="text-[11px] text-slate-500">مفتوح</p>
-                <p className="text-lg font-bold text-slate-900">{violationsReportStats.openCount}</p>
+                <p className="text-lg font-bold tabular-nums text-red-700">{violationsReportStats.openCount}</p>
               </div>
-              <div className="rounded-lg border border-slate-200 p-3">
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
                 <p className="text-[11px] text-slate-500">تمت المعالجة</p>
-                <p className="text-lg font-bold text-slate-900">{violationsReportStats.resolvedCount}</p>
+                <p className="text-lg font-bold tabular-nums text-emerald-700">{violationsReportStats.resolvedCount}</p>
               </div>
-              <div className="rounded-lg border border-slate-200 p-3">
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
                 <p className="text-[11px] text-slate-500">أكثر مخالفة تكرارًا</p>
                 {violationsReportStats.topRepeated.count > 0 ? (
                   <>
-                    <p className="text-sm font-semibold text-slate-900">{violationsReportStats.topRepeated.label}</p>
+                    <p className="text-sm font-semibold leading-snug text-slate-900">
+                      {violationsReportStats.topRepeated.label}
+                    </p>
                     <p className="text-[11px] text-slate-600">{violationsReportStats.topRepeated.count} مرة</p>
                   </>
                 ) : (
@@ -4066,54 +5660,382 @@ export default function Dashboard() {
             </div>
           </section>
           <section className="mb-5">
-            <h2 className="mb-2 text-sm font-semibold text-slate-900">المخالفات حسب النوع</h2>
-            <table className="w-full border-collapse text-sm text-slate-900">
+            <h2 className="ska-print-section-title mb-2 rounded-md px-2 py-1.5 text-sm font-bold text-slate-900">
+              تحليل الأطباق حسب الفرع والفترة الزمنية
+            </h2>
+            <p className="mb-2 text-[11px] text-slate-600">
+              المحور الأفقي: عدد السجلات خلال الفترة المحددة · البيانات من سجلات المراجعة المصفّاة بنفس فترة تقرير
+              المخالفات.
+            </p>
+            {dishChartBarsForPrint.length === 0 ? (
+              <p className="text-xs text-slate-500">لا توجد سجلات أطباق ضمن هذه الفترة.</p>
+            ) : (
+              <div dir="ltr" className="overflow-hidden rounded-lg border border-slate-300 bg-white">
+                <svg
+                  width="100%"
+                  height={Math.min(520, 56 + dishChartBarsForPrint.length * 26)}
+                  viewBox={`0 0 640 ${Math.min(520, 56 + dishChartBarsForPrint.length * 26)}`}
+                  preserveAspectRatio="xMidYMin meet"
+                  role="img"
+                  aria-label="تحليل الأطباق حسب الفرع والفترة الزمنية"
+                >
+                  <text x={320} y={22} textAnchor="middle" fontSize={13} fontWeight={700} fill="#0f172a">
+                    الأطباق ↔ عدد السجلات
+                  </text>
+                  {dishChartBarsForPrint.map((r, i) => {
+                    const rowH = 26;
+                    const y0 = 36 + i * rowH;
+                    const maxC = Math.max(1, ...dishChartBarsForPrint.map((x) => x.count));
+                    const barMax = 280;
+                    const barW = (r.count / maxC) * barMax;
+                    const label =
+                      r.dish.length > 34 ? `${r.dish.slice(0, 34)}…` : r.dish;
+                    return (
+                      <g key={`${r.dish}-${i}`}>
+                        <text x={308} y={y0 + 16} fontSize={11} fill="#0f172a" textAnchor="end">
+                          {label}
+                        </text>
+                        <rect x={318} y={y0} width={barW} height={18} fill="#38bdf8" rx={3} stroke="#1e3a8a" strokeWidth={0.5} />
+                        <text x={318 + barW + 6} y={y0 + 15} fontSize={11} fill="#0f172a">
+                          {r.count}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            )}
+          </section>
+          <section className="mb-5">
+            <h2 className="ska-print-section-title mb-2 rounded-md px-2 py-1.5 text-sm font-bold text-slate-900">
+              المخالفات حسب النوع
+            </h2>
+            <table className="w-full border-collapse border border-slate-300 text-sm text-slate-900">
               <thead>
-                <tr className="border-b border-slate-300 bg-slate-100">
-                  <th className="px-2 py-2 text-start font-semibold">النوع</th>
-                  <th className="px-2 py-2 text-start font-semibold">العدد</th>
+                <tr>
+                  <th className="border border-slate-300 px-2 py-2 text-center font-semibold">النوع</th>
+                  <th className="border border-slate-300 px-2 py-2 text-center font-semibold">العدد</th>
                 </tr>
               </thead>
               <tbody>
-                {VIOLATION_REPORT_CATEGORY_ORDER.map((c) => (
-                  <tr key={c.key} className="border-b border-slate-200">
-                    <td className="px-2 py-1.5">{c.label}</td>
-                    <td className="px-2 py-1.5 tabular-nums">{violationsReportStats.typeCounts[c.key]}</td>
+                {VIOLATION_REPORT_CATEGORY_ORDER.map((c, idx) => (
+                  <tr
+                    key={c.key}
+                    style={{ backgroundColor: idx % 2 === 0 ? "#f8fafc" : "#eff6ff" }}
+                    className="border-b border-slate-200"
+                  >
+                    <td className="border border-slate-200 px-2 py-1.5 break-words">{c.label}</td>
+                    <td className="border border-slate-200 px-2 py-1.5 text-center tabular-nums">
+                      {violationsReportStats.typeCounts[c.key]}
+                    </td>
                   </tr>
                 ))}
                 {violationsReportStats.typeCounts._other > 0 ? (
-                  <tr className="border-b border-slate-200">
-                    <td className="px-2 py-1.5">أخرى</td>
-                    <td className="px-2 py-1.5 tabular-nums">{violationsReportStats.typeCounts._other}</td>
+                  <tr style={{ backgroundColor: "#f8fafc" }} className="border-b border-slate-200">
+                    <td className="border border-slate-200 px-2 py-1.5 break-words">أخرى</td>
+                    <td className="border border-slate-200 px-2 py-1.5 text-center tabular-nums">
+                      {violationsReportStats.typeCounts._other}
+                    </td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
           </section>
           <section>
-            <h2 className="mb-2 text-sm font-semibold text-slate-900">أحدث المخالفات (كل الأعمدة)</h2>
-            <table className="w-full border-collapse text-xs text-slate-900">
+            <h2 className="ska-print-section-title mb-2 rounded-md px-2 py-1.5 text-sm font-bold text-slate-900">
+              تفاصيل المخالفات
+            </h2>
+            <table className="w-full border-collapse border border-slate-300 text-[10px] leading-snug text-slate-900">
               <thead>
-                <tr className="border-b border-slate-300 bg-slate-100">
-                  <th className="px-1 py-2 text-start font-semibold">النوع</th>
-                  <th className="px-1 py-2 text-start font-semibold">التفاصيل</th>
-                  <th className="px-1 py-2 text-start font-semibold">الحالة</th>
-                  <th className="px-1 py-2 text-start font-semibold">الفرع</th>
-                  <th className="px-1 py-2 text-start font-semibold">الكاميرا</th>
-                  <th className="px-1 py-2 text-start font-semibold">الوقت</th>
+                <tr>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">رقم</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">نوع المخالفة</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">التفاصيل</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">الكاميرا</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">الفرع / المنطقة</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">نسبة الثقة</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">مستوى الخطورة</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">الحالة</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">التاريخ والوقت</th>
                 </tr>
               </thead>
               <tbody>
-                {violationsReportStats.latest.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-200 align-top">
-                    <td className="px-1 py-1.5 font-medium">
-                      {violationReportTypeLabel(row.type) || row.label_ar || row.type || "—"}
+                {violationsSortedForExport.map((row, index) => (
+                  <tr
+                    key={row.id}
+                    style={{ backgroundColor: index % 2 === 0 ? "#f8fafc" : "#eff6ff" }}
+                    className="align-top"
+                  >
+                    <td className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">{index + 1}</td>
+                    <td className="border border-slate-200 px-1 py-1.5 break-words font-medium">
+                      {violationTypeLabelForReport(row)}
                     </td>
-                    <td className="max-w-[12rem] px-1 py-1.5 break-words text-slate-700">{row.details || "—"}</td>
-                    <td className="px-1 py-1.5 whitespace-nowrap">{monitoringAlertStatusAr(row.status)}</td>
-                    <td className="px-1 py-1.5">{row.branch || "—"}</td>
-                    <td className="px-1 py-1.5">{row.camera_name || "—"}</td>
-                    <td className="px-1 py-1.5 whitespace-nowrap">{formatSaudiDateTime(row.created_at)}</td>
+                    <td className="border border-slate-200 px-1 py-1.5 break-words text-slate-800">
+                      {row.details || "—"}
+                    </td>
+                    <td className="border border-slate-200 px-1 py-1.5 break-words">{row.camera_name || "—"}</td>
+                    <td className="border border-slate-200 px-1 py-1.5 break-words">
+                      {formatAlertBranchArea(row)}
+                    </td>
+                    <td className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">
+                      {formatMonitoringConfidencePercent(row.confidence)}
+                    </td>
+                    <td
+                      className="border border-slate-200 px-1 py-1.5 text-center text-[10px] font-semibold"
+                      style={monitoringSeverityPrintStyle(row.confidence)}
+                    >
+                      {monitoringSeverityLabelAr(row.confidence)}
+                    </td>
+                    <td
+                      className="border border-slate-200 px-1 py-1.5 text-center text-[10px] font-semibold"
+                      style={monitoringAlertStatusPrintStyle(row.status)}
+                    >
+                      {monitoringAlertStatusAr(row.status)}
+                    </td>
+                    <td className="border border-slate-200 px-1 py-1.5 whitespace-normal break-words text-center font-mono">
+                      {formatSaudiDateTime(row.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </div>
+      ) : null}
+      {(role === "supervisor" || role === "admin") && reviewRecords.length > 0 ? (
+        <div
+          id="ska-dish-review-report-print"
+          dir="rtl"
+          lang="ar"
+          style={{
+            position: "fixed",
+            left: "-9999px",
+            top: 0,
+            width: "210mm",
+            pointerEvents: "none",
+          }}
+          aria-hidden
+        >
+          <header className="mb-4 border-b-2 border-slate-300 pb-3">
+            <h1 className="text-xl font-bold text-slate-900">تقرير مراجعة الأطباق</h1>
+            <p className="mt-2 text-xs font-semibold text-[#1e3a8a]">{REPORT_PLATFORM_TITLE_AR}</p>
+            <p className="text-[11px] leading-relaxed text-slate-600">{REPORT_PLATFORM_TAGLINE_AR}</p>
+            <p className="mt-1 text-xs text-slate-600">
+              تاريخ التقرير: {formatSaudiDateTime(new Date())}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              اسم الفرع:{" "}
+              {String(supervisorSummary?.branch_name || "").trim() ||
+                String(
+                  reviewRecords.find((r) => r.branch_name || r.branch)?.branch_name ||
+                    reviewRecords.find((r) => r.branch_name || r.branch)?.branch ||
+                    "",
+                ).trim() ||
+                "—"}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              الفترة الزمنية: {formatReportPeriodLabel(reviewFilters.dateFrom, reviewFilters.dateTo)}
+            </p>
+          </header>
+          <section className="mb-5">
+            <h2 className="ska-print-section-title mb-2 rounded-md px-2 py-1.5 text-sm font-bold text-slate-900">
+              ملخص
+            </h2>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
+                <p className="text-[11px] text-slate-500">إجمالي الأطباق</p>
+                <p className="text-lg font-bold tabular-nums text-slate-900">{dishReviewPdfStats.total}</p>
+              </div>
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
+                <p className="text-[11px] text-slate-500">عدد الأطباق التي تحتاج مراجعة</p>
+                <p className="text-lg font-bold tabular-nums text-orange-700">{dishReviewPdfStats.pending}</p>
+              </div>
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
+                <p className="text-[11px] text-slate-500">عدد الأطباق المعتمدة</p>
+                <p className="text-lg font-bold tabular-nums text-emerald-700">{dishReviewPdfStats.approved}</p>
+              </div>
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
+                <p className="text-[11px] text-slate-500">عدد الأطباق المرفوضة</p>
+                <p className="text-lg font-bold tabular-nums text-red-700">{dishReviewPdfStats.rejected}</p>
+              </div>
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
+                <p className="text-[11px] text-slate-500">أكثر طبق تكرارًا</p>
+                <p className="text-sm font-semibold leading-snug text-slate-900">{dishReviewPdfStats.topDish}</p>
+              </div>
+              <div className="rounded-lg border border-slate-300 bg-slate-50 p-3">
+                <p className="text-[11px] text-slate-500">أكثر موظف لديه مراجعات</p>
+                <p className="text-sm font-semibold leading-snug text-slate-900">{dishReviewPdfStats.topEmployee}</p>
+              </div>
+            </div>
+          </section>
+          <section className="mb-5">
+            <h2 className="ska-print-section-title mb-2 rounded-md px-2 py-1.5 text-sm font-bold text-slate-900">
+              الأطباق حسب حالة المراجعة
+            </h2>
+            <p className="mb-2 text-[11px] text-slate-600">
+              الأشرطة المكدّسة: معتمد (أخضر) · يحتاج مراجعة (برتقالي) · مرفوض (أحمر) · أخرى (رمادي).
+            </p>
+            {dishReviewChartBarsForPrint.length === 0 ? (
+              <p className="text-xs text-slate-500">لا توجد بيانات كافية للرسم.</p>
+            ) : (
+              <div dir="ltr" className="overflow-hidden rounded-lg border border-slate-300 bg-white">
+                <svg
+                  width="100%"
+                  height={Math.min(520, 72 + dishReviewChartBarsForPrint.length * 28)}
+                  viewBox={`0 0 640 ${Math.min(520, 72 + dishReviewChartBarsForPrint.length * 28)}`}
+                  preserveAspectRatio="xMidYMin meet"
+                  role="img"
+                  aria-label="الأطباق حسب حالة المراجعة"
+                >
+                  <text x={320} y={22} textAnchor="middle" fontSize={13} fontWeight={700} fill="#0f172a">
+                    الأطباق حسب حالة المراجعة
+                  </text>
+                  <text x={320} y={42} textAnchor="middle" fontSize={10} fill="#475569">
+                    المحور الأفقي: عدد السجلات · على الجانب: أسماء الأطباق
+                  </text>
+                  {dishReviewChartBarsForPrint.map((r, i) => {
+                    const rowH = 28;
+                    const y0 = 52 + i * rowH;
+                    const barMax = 260;
+                    const total = Math.max(1, r.total);
+                    const x0 = 296;
+                    let x = x0;
+                    const parts = [
+                      { n: r.approved, fill: "#15803d" },
+                      { n: r.pending, fill: "#ea580c" },
+                      { n: r.rejected, fill: "#dc2626" },
+                      { n: r.other, fill: "#94a3b8" },
+                    ];
+                    const label = r.dish.length > 28 ? `${r.dish.slice(0, 28)}…` : r.dish;
+                    return (
+                      <g key={`${r.dish}-${i}`}>
+                        <text x={284} y={y0 + 18} fontSize={11} fill="#0f172a" textAnchor="end">
+                          {label}
+                        </text>
+                        {parts.map((p, j) => {
+                          if (p.n <= 0) return null;
+                          const w = Math.max(1.5, (p.n / total) * barMax);
+                          const nextX = x + w;
+                          const node = (
+                            <rect
+                              key={`bar-${r.dish}-${i}-${j}`}
+                              x={x}
+                              y={y0}
+                              width={w}
+                              height={20}
+                              fill={p.fill}
+                              rx={2}
+                              stroke="#ffffff"
+                              strokeWidth={0.75}
+                            />
+                          );
+                          x = nextX;
+                          return node;
+                        })}
+                        <text x={x0 + barMax + 10} y={y0 + 16} fontSize={11} fill="#0f172a">
+                          {r.total}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+                <div className="flex flex-wrap gap-4 border-t border-slate-200 px-3 py-2 text-[10px] text-slate-700">
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-3 w-3 rounded-sm bg-[#15803d]" /> معتمد
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-3 w-3 rounded-sm bg-[#ea580c]" /> يحتاج مراجعة
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-3 w-3 rounded-sm bg-[#dc2626]" /> مرفوض
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block h-3 w-3 rounded-sm bg-[#94a3b8]" /> أخرى
+                  </span>
+                </div>
+              </div>
+            )}
+          </section>
+          <section className="mb-5">
+            <h2 className="ska-print-section-title mb-2 rounded-md px-2 py-1.5 text-sm font-bold text-slate-900">
+              ملخص حسب الطبق والحالة
+            </h2>
+            <table className="w-full border-collapse border border-slate-300 text-xs text-slate-900">
+              <thead>
+                <tr>
+                  <th className="border border-slate-300 px-2 py-2 text-center font-semibold">الطبق</th>
+                  <th className="border border-slate-300 px-2 py-2 text-center font-semibold">الحالة</th>
+                  <th className="border border-slate-300 px-2 py-2 text-center font-semibold">عدد السجلات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dishReviewStatusSummaryRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="border border-slate-200 px-2 py-3 text-center text-slate-500">
+                      لا توجد بيانات
+                    </td>
+                  </tr>
+                ) : (
+                  dishReviewStatusSummaryRows.map((row, idx) => (
+                    <tr
+                      key={`${row.dish}-${row.statusAr}-${idx}`}
+                      style={{ backgroundColor: idx % 2 === 0 ? "#f8fafc" : "#eff6ff" }}
+                    >
+                      <td className="border border-slate-200 px-2 py-1.5 break-words">{row.dish}</td>
+                      <td
+                        className="border border-slate-200 px-2 py-1.5 text-center font-semibold"
+                        style={dishReviewArabicStatusPrintStyle(row.statusAr)}
+                      >
+                        {row.statusAr}
+                      </td>
+                      <td className="border border-slate-200 px-2 py-1.5 text-center tabular-nums">{row.count}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </section>
+          <section>
+            <h2 className="ska-print-section-title mb-2 rounded-md px-2 py-1.5 text-sm font-bold text-slate-900">
+              تفاصيل السجلات
+            </h2>
+            <table className="w-full border-collapse border border-slate-300 text-[10px] leading-snug text-slate-900">
+              <thead>
+                <tr>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">رقم</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">اسم الموظف</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">الطبق المقترح</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">الطبق المعتمد</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">الكمية</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">الحالة</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">وقت التسجيل</th>
+                  <th className="border border-slate-300 px-1 py-2 text-center font-semibold">وقت المراجعة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviewRecords.map((row, index) => (
+                  <tr
+                    key={row.id}
+                    style={{ backgroundColor: index % 2 === 0 ? "#f8fafc" : "#eff6ff" }}
+                    className="align-top"
+                  >
+                    <td className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">{index + 1}</td>
+                    <td className="border border-slate-200 px-1 py-1.5 break-words">{row.employee_name || "—"}</td>
+                    <td className="border border-slate-200 px-1 py-1.5 break-words">{row.predicted_label || "—"}</td>
+                    <td className="border border-slate-200 px-1 py-1.5 break-words">{row.confirmed_label || "—"}</td>
+                    <td className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">{row.quantity ?? "—"}</td>
+                    <td
+                      className="border border-slate-200 px-1 py-1.5 text-center font-semibold"
+                      style={dishReviewStatusPrintStyle(row.status)}
+                    >
+                      {dishReviewStatusArExport(row.status)}
+                    </td>
+                    <td className="border border-slate-200 px-1 py-1.5 whitespace-normal break-words text-center font-mono">
+                      {row.recorded_at ? formatSaudiDateTime(row.recorded_at) : "—"}
+                    </td>
+                    <td className="border border-slate-200 px-1 py-1.5 whitespace-normal break-words text-center font-mono">
+                      {row.reviewed_at ? formatSaudiDateTime(row.reviewed_at) : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>

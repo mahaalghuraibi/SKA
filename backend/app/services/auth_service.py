@@ -47,6 +47,15 @@ def create_access_token(subject: str) -> str:
 
 def decode_access_token(token: str) -> dict | None:
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            options={
+                "verify_signature": True,
+                "verify_exp": True,
+                "require_exp": True,
+            },
+        )
     except JWTError:
         return None

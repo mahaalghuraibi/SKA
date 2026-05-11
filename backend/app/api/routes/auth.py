@@ -1,16 +1,16 @@
 from typing import Annotated
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.auth import TokenResponse
 from app.schemas.user import UserCreate, UserOut
+from app.core.limiter import limiter
 from app.services.auth_service import (
     create_access_token,
     hash_password,
@@ -50,7 +50,9 @@ def _ensure_unique_username(db: Session, raw_username: str, *, fallback_email: s
         "(email) and `password`. Do not send JSON."
     ),
 )
+@limiter.limit("25/minute")
 def login(
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Session = Depends(get_db),
 ) -> TokenResponse:
@@ -75,21 +77,15 @@ def login(
     )
     user_found = user is not None
     password_ok = verify_password(form_data.password, user.password) if user_found else False
-    logger.info(
-        "login attempt identifier=%s user_found=%s password_ok=%s role=%s db=%s",
-        login_key,
-        user_found,
-        password_ok,
-        user.role if user_found else None,
-        settings.DATABASE_URL,
-    )
     if not user_found or not password_ok:
+        logger.info("login failed user_found=%s", user_found)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="بيانات الدخول غير صحيحة",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    logger.info("login success user_id=%s role=%s", user.id, user.role)
     token = create_access_token(subject=user.email)
     return TokenResponse(
         id=user.id,
@@ -108,7 +104,9 @@ def login(
     response_model=UserOut,
     status_code=status.HTTP_201_CREATED,
 )
+@limiter.limit("40/hour")
 def create_user(
+    request: Request,
     payload: UserCreate,
     db: Session = Depends(get_db),
 ) -> UserOut:

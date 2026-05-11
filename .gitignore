@@ -12,21 +12,33 @@ build/
 frontend/dist/
 frontend/build/
 
-## Python cache/artifacts
+## Python cache / artifacts (__pycache__ dirs anywhere)
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
+*.pyc
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
-## Local environment and secrets
+## Local environment and secrets (never commit real keys)
 .env
 .env.*
+*.env
 backend/.env
 
 ## Local databases
 *.sqlite3
 *.db
+
+## Temp / runtime dirs
+tmp/
+media/tmp/
+
+## ML model weights & large binaries (regenerate via backend/ml scripts)
+*.pt
+*.onnx
 
 ## OS/editor noise
 .DS_Store

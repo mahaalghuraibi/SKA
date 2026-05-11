@@ -1,11 +1,12 @@
 import logging
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.rbac import require_roles
+from app.core.limiter import limiter
 from app.db.session import get_db
 from app.models.dish_record import DishRecord
 from app.models.user import User
@@ -14,6 +15,8 @@ from app.services.professional_dish_vision import classify_dish_image, refresh_r
 
 router = APIRouter(tags=["dish-detection"])
 logger = logging.getLogger(__name__)
+
+_DISH_IMAGE_UPLOAD_MAX_BYTES = 12_000_000
 
 
 def _uncertain() -> DetectDishResponse:
@@ -107,7 +110,9 @@ def _enhance_with_history(result: dict[str, object], db: Session, tenant_id: int
     response_model=DetectDishResponse,
     dependencies=[Depends(require_roles("admin", "supervisor", "staff"))],
 )
+@limiter.limit("48/minute")
 async def detect_dish(
+    request: Request,
     image: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -118,21 +123,22 @@ async def detect_dish(
     image_bytes = await image.read()
     if not image_bytes:
         raise HTTPException(status_code=400, detail="تعذر التعرف على الطبق")
+    if len(image_bytes) > _DISH_IMAGE_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="حجم الصورة يتجاوز الحد المسموح.")
 
     try:
-        logger.warning("detect-dish called: content_type=%s image_bytes=%s", image.content_type, len(image_bytes))
+        logger.debug("detect-dish called: content_type=%s bytes=%s", image.content_type, len(image_bytes))
         result = classify_dish_image(image_bytes=image_bytes)
-        logger.warning(
-            "detect-dish pipeline raw result: vision_model=%s dish=%s confidence=%s suggestions=%s",
+        logger.debug(
+            "detect-dish raw: vision_model=%s dish=%s confidence=%s",
             result.get("vision_model"),
             result.get("dish_name"),
             result.get("confidence"),
-            result.get("suggestions"),
         )
         result = _enhance_with_history(result, db=db, tenant_id=current_user.tenant_id)
         result = refresh_review_metadata(result)
-        logger.warning(
-            "detect-dish final result: dish=%s confidence=%s needs_review=%s",
+        logger.debug(
+            "detect-dish final: dish=%s confidence=%s needs_review=%s",
             result.get("dish_name"),
             result.get("confidence"),
             result.get("needs_review"),

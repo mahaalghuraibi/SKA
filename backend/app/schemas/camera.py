@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_serializer
+
+from app.security.stream_url import redact_stream_url_for_response
 
 
 class CameraCreate(BaseModel):
@@ -10,6 +12,8 @@ class CameraCreate(BaseModel):
 
 
 class CameraOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     location: str
@@ -17,5 +21,7 @@ class CameraOut(BaseModel):
     is_active: bool
     tenant_id: int
 
-    class Config:
-        from_attributes = True
+    @field_serializer("stream_url")
+    @classmethod
+    def _redact_stream_url(cls, v: str | None) -> str | None:
+        return redact_stream_url_for_response(v)

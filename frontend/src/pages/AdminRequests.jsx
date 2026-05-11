@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ACCESS_TOKEN_KEY } from "../constants.js";
 import SKALogo from "../components/SKALogo.jsx";
+import { PUBLIC_PAGE_TITLES } from "../constants/branding.js";
 
 const ADMIN_REQUESTS_URL = "/api/v1/admin-requests";
 
@@ -33,6 +34,10 @@ function statusLabelAr(status) {
 export default function AdminRequestsPage() {
   const token = localStorage.getItem(ACCESS_TOKEN_KEY) || "";
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
+  useEffect(() => {
+    document.title = PUBLIC_PAGE_TITLES.adminRequests;
+  }, []);
 
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -136,26 +141,22 @@ export default function AdminRequestsPage() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-surface text-slate-100" dir="rtl">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute inset-0 hero-premium-base" />
-        <div className="absolute inset-0 hero-premium-mesh hero-mesh-anim opacity-90" />
-        <div className="absolute inset-0 opacity-45 hero-grid-lines" />
-      </div>
+      <div className="pointer-events-none absolute inset-0 overflow-hidden admin-page-static-bg" aria-hidden />
       <div className="pointer-events-none absolute inset-0 hero-vignette" />
 
-      <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/80 backdrop-blur-xl">
+      <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/85 backdrop-blur-md supports-[backdrop-filter]:bg-[#0F172A]/78">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-3 py-3 sm:px-6">
-          <Link to="/dashboard" className="flex items-center">
+          <Link to="/analytics" className="flex items-center">
             <SKALogo compact />
           </Link>
-          <Link to="/dashboard" className="text-sm font-medium text-slate-400 transition hover:text-brand-sky">
+          <Link to="/analytics" className="text-sm font-medium text-slate-400 transition hover:text-brand-sky">
             العودة للوحة التحكم
           </Link>
         </div>
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-7xl px-3 py-6 sm:px-6 sm:py-8 lg:px-8">
-        <section className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass-lg backdrop-blur-xl sm:rounded-3xl sm:p-6">
+        <section className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.78)] p-4 shadow-glass-lg backdrop-blur-md sm:rounded-3xl sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="text-xl font-bold text-white sm:text-2xl">طلبات الحساب الإداري</h1>

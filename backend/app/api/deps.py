@@ -33,18 +33,25 @@ def get_current_user(
 ) -> User:
     payload = decode_access_token(token) if token else None
     user = _user_from_access_token(token, db)
-    if settings.DEV_AUTH_BYPASS and not user:
+    if settings.effective_dev_auth_bypass and not user:
         user = db.query(User).order_by(User.id.asc()).first()
         if user:
             logger.warning("DEV_AUTH_BYPASS active: endpoint=%s using user_id=%s", request.url.path, user.id)
-    logger.info(
-        "auth check endpoint=%s token_exists=%s user_id=%s role=%s branch=%s",
-        request.url.path,
-        bool(token),
-        user.id if user else None,
-        user.role if user else payload.get("role") if isinstance(payload, dict) else None,
-        user.branch_id if user else None,
-    )
+    if settings.is_production:
+        logger.debug(
+            "auth endpoint=%s ok=%s",
+            request.url.path,
+            bool(user),
+        )
+    else:
+        logger.info(
+            "auth check endpoint=%s token_exists=%s user_id=%s role=%s branch=%s",
+            request.url.path,
+            bool(token),
+            user.id if user else None,
+            user.role if user else payload.get("role") if isinstance(payload, dict) else None,
+            user.branch_id if user else None,
+        )
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

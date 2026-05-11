@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS, USER_INFO_KEY, USER_ROLE_KEY } from "../constants.js";
+import { safeJsonParse } from "../utils/safeJson.js";
 
 export function useDashboardAuth({ setToast }) {
   const navigate = useNavigate();
@@ -49,7 +50,7 @@ export function useDashboardAuth({ setToast }) {
       for (const url of CURRENT_USER_ME_URLS) {
         try {
           const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-          const body = await r.json().catch(() => ({}));
+          const body = safeJsonParse(await r.text(), {});
           if (r.ok && body?.role) {
             localStorage.setItem(USER_ROLE_KEY, body.role);
             setRole(body.role);

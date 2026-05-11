@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import SKALogo from "../components/SKALogo.jsx";
+import { PUBLIC_PAGE_TITLES } from "../constants/branding.js";
 
 const ADMIN_REQUEST_URL = "/api/v1/admin-requests";
 
 export default function AdminRequestPage() {
+  useEffect(() => {
+    document.title = PUBLIC_PAGE_TITLES.adminRequest;
+  }, []);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [organization, setOrganization] = useState("");
@@ -51,23 +56,17 @@ export default function AdminRequestPage() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-surface text-slate-100" dir="rtl">
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute inset-0 hero-premium-base" />
-        <div className="absolute inset-0 hero-premium-mesh hero-mesh-anim opacity-90" />
-        <div className="absolute inset-0 opacity-45 hero-grid-lines" />
-        <div className="hero-orb hero-orb-a" />
-        <div className="hero-orb hero-orb-b" />
-      </div>
+      <div className="pointer-events-none absolute inset-0 overflow-hidden admin-page-static-bg" aria-hidden />
       <div className="pointer-events-none absolute inset-0 hero-vignette" />
 
-      <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/80 backdrop-blur-xl">
+      <header className="relative z-10 border-b border-white/10 bg-[#0F172A]/85 backdrop-blur-md supports-[backdrop-filter]:bg-[#0F172A]/78">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-3 py-3 sm:gap-3 sm:px-6">
           <Link to="/" className="flex items-center">
             <SKALogo compact />
           </Link>
           <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-4">
             <Link
-              to="/register"
+              to="/signup"
               className="text-sm font-medium text-slate-400 transition hover:text-brand-sky"
             >
               إنشاء حساب

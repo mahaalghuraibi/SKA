@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
+
+from app.security.stream_url import redact_stream_url_for_response
 
 
 class SupervisorCameraCreate(BaseModel):
@@ -29,6 +31,11 @@ class SupervisorCameraOut(BaseModel):
     tenant_id: int
     last_analysis_at: datetime | None = None
     analysis_mode: str = "basic"
+
+    @field_serializer("stream_url")
+    @classmethod
+    def _redact_supervisor_stream_url(cls, v: str | None) -> str | None:
+        return redact_stream_url_for_response(v)
 
 
 class SupervisorAlertOut(BaseModel):

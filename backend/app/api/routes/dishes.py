@@ -4,13 +4,14 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.api.rbac import ROLE_STAFF, require_roles
+from app.core.limiter import limiter
 from app.db.session import get_db
 from app.models.dish_record import DishRecord
 from app.models.user import User
@@ -25,6 +26,8 @@ from app.services.dish_image_storage import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dishes", tags=["dishes"])
+
+_DISH_DETECT_UPLOAD_MAX_BYTES = 12_000_000
 
 _RIYADH = ZoneInfo("Asia/Riyadh")
 
@@ -131,7 +134,9 @@ def create_dish(
     response_model=DishDetectResponse,
     dependencies=[Depends(require_roles("admin", "supervisor", "staff"))],
 )
+@limiter.limit("48/minute")
 async def detect_dish(
+    request: Request,
     image: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ) -> DishDetectResponse:
@@ -142,6 +147,8 @@ async def detect_dish(
     image_bytes = await image.read()
     if not image_bytes:
         raise HTTPException(status_code=400, detail="الصورة فارغة.")
+    if len(image_bytes) > _DISH_DETECT_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="حجم الصورة يتجاوز الحد المسموح.")
 
     detected, alternatives, confidence, provider = detect_dish_from_image(image_bytes, image.filename or "")
     return DishDetectResponse(

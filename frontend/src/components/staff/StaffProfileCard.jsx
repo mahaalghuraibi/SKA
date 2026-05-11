@@ -49,8 +49,8 @@ export default function StaffProfileCard({ staffProfileLoading, staffMe }) {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 lg:flex-col lg:items-end">
-        <span className="inline-flex rounded-full border border-white/12 bg-white/[0.05] px-3 py-1.5 text-[11px] font-medium text-slate-400">
-          منصة SKA
+        <span className="inline-flex rounded-full border border-white/14 bg-white/[0.06] px-3 py-1.5 text-[11px] font-medium text-slate-300 ring-1 ring-white/[0.04]">
+          منصة تعيين الجودة
         </span>
       </div>
     </div>

@@ -1,5 +1,6 @@
 """
-Kitchen safety monitoring: Gemini Vision only (when not in demo mode).
+Kitchen safety monitoring: production path uses YOLO PPE (see yolo_monitoring_service).
+Gemini helpers remain for optional / legacy flows; dish recognition is separate.
 """
 
 from __future__ import annotations
@@ -17,11 +18,11 @@ logger = logging.getLogger(__name__)
 
 CHECK_DEFS: list[tuple[str, str]] = [
     ("mask", "الكمامة"),
-    ("gloves", "القفازات"),
-    ("headcover", "غطاء الرأس"),
+    ("glove", "القفازات"),
+    ("helmet", "غطاء الرأس / قبعة الشيف"),
     ("uniform", "الزي الرسمي"),
-    ("wet_floor", "الأرضيات المبللة"),
-    ("trash_location", "موقع الحاويات"),
+    ("trash_floor", "النفايات على الأرض"),
+    ("waste_area", "موقع النفايات والحاويات"),
     ("people_count", "عدد الأشخاص"),
 ]
 
@@ -35,14 +36,19 @@ STATUS_AR = {
 VIOLATION_TYPE_LABELS: dict[str, str] = {
     "no_mask": "عدم ارتداء الكمامة",
     "no_gloves": "عدم ارتداء القفازات",
-    "no_headcover": "عدم ارتداء غطاء الرأس",
-    "no_uniform": "عدم ارتداء الزي الرسمي",
-    "wet_floor": "أرضية مبللة",
-    "trash_location": "موقع حاويات غير مناسب",
+    "no_headcover": "عدم ارتداء غطاء الرأس / قبعة الشيف",
+    "improper_uniform": "عدم ارتداء الزي الرسمي",
+    "trash_on_floor": "نفايات على الأرض",
+    "improper_waste_area": "موقع النفايات غير ملائم",
+    # Legacy DB / payloads (normalize at UI when aggregating)
+    "no_glove": "عدم ارتداء القفازات",
+    "no_helmet": "عدم ارتداء غطاء الرأس / قبعة الشيف",
+    "no_head_cover": "عدم ارتداء غطاء الرأس / قبعة الشيف",
 }
 
 # Prompt in English for reliable JSON output; Arabic used only in label/reason fields.
-GEMINI_PROMPT_MONITORING = """You are a kitchen food-safety compliance inspector. Analyze the image and assess each safety item based on what you can observe.
+GEMINI_PROMPT_MONITORING = """You are a kitchen food-safety compliance inspector for restaurant kitchens (YOLO may also run separately).
+Only assess these items — do NOT assess goggles, shoes, or floor/trash hygiene here.
 
 STATUS DEFINITIONS:
 - "safe"         : the requirement is clearly met.
@@ -58,13 +64,11 @@ CONFIDENCE SCALE (integer 0-100):
 
 VIOLATION DETECTION RULES — report "violation" when:
 - mask       : a person's face is clearly visible and they are NOT wearing a mask or face covering.
-- gloves     : hands are visible and clearly bare during food contact or food preparation.
-- headcover  : hair is clearly visible without any cap, hairnet, or head covering.
-- uniform    : person is clearly wearing civilian clothing instead of a proper food-service uniform.
-- wet_floor  : floor surface is visibly wet, slippery, or has liquid spills with no warning sign.
-- trash_location : waste, garbage, or trash container is in or near the food preparation area.
+- glove      : hands are visible and clearly bare during food contact or food preparation.
+- helmet     : hair/head is clearly visible without head cover, chef hat, hairnet, or equivalent kitchen headwear.
+- uniform    : person clearly lacks proper kitchen uniform / apron / safety vest when expected.
 
-Use "uncertain" only when the item is completely outside the frame. If you can see any part of a person, assess mask/gloves/headcover/uniform as best you can with an appropriate confidence.
+Use "uncertain" only when the item is completely outside the frame. If you can see any part of a person, assess mask, glove, helmet, uniform as best you can.
 
 Return JSON ONLY — no markdown fences, no text outside the JSON object:
 {
@@ -81,7 +85,7 @@ Return JSON ONLY — no markdown fences, no text outside the JSON object:
   ]
 }
 
-Include exactly one entry per key in this order: mask, gloves, headcover, uniform, wet_floor, trash_location, people_count.
+Include exactly one entry per key in this order: mask, glove, helmet, uniform, people_count.
 """
 
 _NOT_VISIBLE_HINT = re.compile(
@@ -196,7 +200,7 @@ def _row_for_key(checks_in: list[dict[str, Any]], key: str) -> dict[str, Any]:
 
 def _apply_visibility_post_rules(checks_out: list[dict[str, Any]]) -> None:
     """Downgrade impossible 'safe' calls when the reason admits poor visibility."""
-    keys = {"gloves", "wet_floor", "trash_location", "uniform"}
+    keys = {"glove", "helmet", "uniform"}
     for row in checks_out:
         if row.get("key") not in keys:
             continue
@@ -209,6 +213,16 @@ def _apply_visibility_post_rules(checks_out: list[dict[str, Any]]) -> None:
             row["confidence"] = min(int(row.get("confidence") or 0), 55)
 
 
+def _display_status(provider: str, raw_status: str, conf: int) -> str:
+    """YOLO keeps raw violation/safe for clearer cards; Gemini keeps confidence buckets."""
+    if provider == "yolo":
+        rs = (raw_status or "").strip().lower()
+        if rs in ("safe", "violation", "uncertain", "needs_review"):
+            return rs
+        return "uncertain"
+    return _bucket_display_status(raw_status, conf)
+
+
 def _finalize_payload(
     *,
     provider: str,
@@ -216,6 +230,12 @@ def _finalize_payload(
     location: str | None,
     checks_in: list[dict[str, Any]],
     people_count_top: int | None = None,
+    violation_conf_threshold: int = _VIOLATION_CONF_THRESHOLD,
+    violations_override: list[dict[str, Any]] | None = None,
+    violation_thresholds: dict[str, int] | None = None,
+    default_violation_threshold: int | None = None,
+    frame_report: dict[str, Any] | None = None,
+    skip_display_bucket_for_yolo: bool = False,
 ) -> dict[str, Any]:
     checks_out: list[dict[str, Any]] = []
     # Track the original AI status (before display bucketing) so violation
@@ -230,7 +250,11 @@ def _finalize_payload(
         conf = _to_int_confidence(src.get("confidence", 0))
         label_ar = str(src.get("label_ar", "")).strip() or default_label_ar
         reason = str(src.get("reason_ar", "")).strip() or "—"
-        disp = _bucket_display_status(raw_status, conf)
+        disp = (
+            _display_status(provider, raw_status, conf)
+            if skip_display_bucket_for_yolo or provider == "yolo"
+            else _bucket_display_status(raw_status, conf)
+        )
         if disp == "needs_review":
             needs_review_any = True
         confidences.append(conf)
@@ -273,47 +297,82 @@ def _finalize_payload(
 
     vtypes_from_checks = {
         "mask": "no_mask",
-        "gloves": "no_gloves",
-        "headcover": "no_headcover",
-        "uniform": "no_uniform",
-        "wet_floor": "wet_floor",
-        "trash_location": "trash_location",
+        "glove": "no_gloves",
+        "helmet": "no_headcover",
+        "uniform": "improper_uniform",
+        "trash_floor": "trash_on_floor",
+        "waste_area": "improper_waste_area",
     }
 
     violations_out: list[dict[str, Any]] = []
-    existing_types: set[str] = set()
 
-    for row in checks_out:
-        if row["key"] == "people_count":
-            continue
-        # Use original AI status (before display bucketing) so a "violation" at
-        # 65-84% confidence is not silently lost when bucketed to "needs_review".
-        orig_status, conf = original_status_by_key.get(row["key"], ("uncertain", 0))
-        logger.debug("check key=%s orig=%s conf=%d disp=%s", row["key"], orig_status, conf, row["status"])
-        if orig_status == "violation" and conf >= _VIOLATION_CONF_THRESHOLD:
-            vt = vtypes_from_checks.get(row["key"])
-            if vt and vt not in existing_types:
-                reason = row["reason_ar"]
-                violations_out.append(
-                    {
-                        "type": vt,
-                        "label_ar": VIOLATION_TYPE_LABELS.get(vt, row["label_ar"]),
-                        "confidence": conf,
-                        "reason_ar": reason,
-                        "description": reason,   # human-readable alias
-                        "status": "new",
-                    }
-                )
-                existing_types.add(vt)
-                logger.info("violation recorded: type=%s conf=%d", vt, conf)
-                if not needs_review_any:
-                    needs_review_any = True
+    if violations_override is not None:
+        th_map = violation_thresholds or {}
+        default_t = int(default_violation_threshold if default_violation_threshold is not None else violation_conf_threshold)
+        for v in violations_override:
+            if not isinstance(v, dict):
+                continue
+            vt = str(v.get("type", "")).strip()
+            if not vt:
+                continue
+            cf = _to_int_confidence(v.get("confidence", 0))
+            min_cf = int(th_map.get(vt, default_t))
+            if cf < min_cf:
+                continue
+            reason = str(v.get("reason_ar", "")).strip() or "—"
+            violations_out.append(
+                {
+                    "type": vt,
+                    "label_ar": str(v.get("label_ar", "")).strip() or VIOLATION_TYPE_LABELS.get(vt, vt),
+                    "confidence": cf,
+                    "reason_ar": reason,
+                    "description": str(v.get("description", "")).strip() or reason,
+                    "status": str(v.get("status", "new")).strip() or "new",
+                    **({"person_index": v["person_index"]} if v.get("person_index") is not None else {}),
+                    **({"alias_of": v["alias_of"]} if v.get("alias_of") else {}),
+                }
+            )
+            logger.info("violation recorded (override): type=%s conf=%d", vt, cf)
+        needs_review_any = needs_review_any or bool(violations_out)
+    else:
+        existing_types: set[str] = set()
+
+        for row in checks_out:
+            if row["key"] == "people_count":
+                continue
+            orig_status, conf = original_status_by_key.get(row["key"], ("uncertain", 0))
+            logger.debug("check key=%s orig=%s conf=%d disp=%s", row["key"], orig_status, conf, row["status"])
+            if orig_status == "violation" and conf >= violation_conf_threshold:
+                vt = vtypes_from_checks.get(row["key"])
+                if vt and vt not in existing_types:
+                    reason = row["reason_ar"]
+                    violations_out.append(
+                        {
+                            "type": vt,
+                            "label_ar": VIOLATION_TYPE_LABELS.get(vt, row["label_ar"]),
+                            "confidence": conf,
+                            "reason_ar": reason,
+                            "description": reason,
+                            "status": "new",
+                        }
+                    )
+                    existing_types.add(vt)
+                    logger.info("violation recorded: type=%s conf=%d", vt, conf)
+                    if not needs_review_any:
+                        needs_review_any = True
 
     overall = int(round(sum(confidences) / max(1, len(confidences)))) if confidences else 0
 
     # Build a plain-language Arabic summary
-    vcount = len(violations_out)
-    if vcount > 0:
+    display_violations = [v for v in violations_out if not v.get("alias_of")]
+    vcount = len(display_violations)
+    if provider == "yolo" and display_violations:
+        parts = [
+            f"{v.get('label_ar') or VIOLATION_TYPE_LABELS.get(v['type'], v['type'])} — {int(v.get('confidence', 0))}%"
+            for v in display_violations
+        ]
+        summary = "؛ ".join(parts)
+    elif vcount > 0:
         summary = f"تم اكتشاف {vcount} مخالفة."
     elif needs_review_any:
         summary = "بعض الفحوصات تحتاج مراجعة."
@@ -325,7 +384,7 @@ def _finalize_payload(
         provider, vcount, needs_review_any, overall, summary,
     )
 
-    return {
+    out: dict[str, Any] = {
         "ok": True,
         "status": "ok",
         "provider": provider,
@@ -338,6 +397,9 @@ def _finalize_payload(
         "violations": violations_out,
         "summary": summary,
     }
+    if frame_report:
+        out["frame_report"] = frame_report
+    return out
 
 
 def _gemini_model_candidates() -> list[str]:
@@ -568,13 +630,11 @@ def _run_gemini_monitoring(image_bytes: bytes, camera_name: str | None, location
 
 def _analyze_demo(camera_name: str | None, location: str | None) -> dict[str, Any]:
     checks_list = [
-        {"key": "mask",           "label_ar": "الكمامة",           "status": "violation",    "confidence": 90, "reason_ar": "وضع تجريبي."},
-        {"key": "gloves",         "label_ar": "القفازات",          "status": "safe",         "confidence": 88, "reason_ar": "وضع تجريبي."},
-        {"key": "headcover",      "label_ar": "غطاء الرأس",        "status": "uncertain",    "confidence": 50, "reason_ar": "وضع تجريبي."},
-        {"key": "uniform",        "label_ar": "الزي الرسمي",       "status": "safe",         "confidence": 86, "reason_ar": "وضع تجريبي."},
-        {"key": "wet_floor",      "label_ar": "الأرضيات المبللة",  "status": "safe",         "confidence": 87, "reason_ar": "وضع تجريبي."},
-        {"key": "trash_location", "label_ar": "موقع الحاويات",     "status": "needs_review", "confidence": 70, "reason_ar": "وضع تجريبي: يحتاج مراجعة بشرية."},
-        {"key": "people_count",   "label_ar": "عدد الأشخاص",       "status": "safe",         "confidence": 92, "reason_ar": "وضع تجريبي."},
+        {"key": "mask",           "label_ar": "الكمامة",              "status": "violation", "confidence": 90, "reason_ar": "وضع تجريبي: كشف تجريبي للكمامة فقط."},
+        {"key": "glove",          "label_ar": "القفازات",             "status": "safe",      "confidence": 88, "reason_ar": "وضع تجريبي."},
+        {"key": "helmet",         "label_ar": "غطاء الرأس / قبعة الشيف", "status": "uncertain", "confidence": 50, "reason_ar": "وضع تجريبي."},
+        {"key": "uniform",        "label_ar": "الزي الرسمي",          "status": "safe",      "confidence": 85, "reason_ar": "وضع تجريبي."},
+        {"key": "people_count",   "label_ar": "عدد الأشخاص",          "status": "safe",      "confidence": 92, "reason_ar": "وضع تجريبي."},
     ]
     return _finalize_payload(
         provider="demo",
@@ -592,23 +652,14 @@ def analyze_monitoring_frame(
     camera_name: str | None,
     location: str | None,
 ) -> dict[str, Any]:
-    gemini_configured = bool((settings.MONITORING_GEMINI_API_KEY or settings.GEMINI_API_KEY or "").strip())
     logger.info(
-        "analyze_monitoring_frame: demo=%s gemini_configured=%s content_type=%s bytes=%d",
-        settings.MONITORING_AI_DEMO_MODE, gemini_configured,
+        "analyze_monitoring_frame: content_type=%s bytes=%d",
         content_type or "—", len(image_bytes),
     )
 
-    if settings.MONITORING_AI_DEMO_MODE:
-        if not image_bytes:
-            raise ValueError("الصورة غير صالحة.")
-        return _analyze_demo(camera_name, location)
-
-    if not gemini_configured:
-        raise ValueError("AI المراقبة غير مفعل. يرجى إضافة مفتاح Gemini API.")
-
     if not image_bytes:
         raise ValueError("الصورة غير صالحة.")
+
     # Browsers / proxies sometimes send application/octet-stream; PIL validates real image bytes.
     ct = (content_type or "").strip().lower()
     if ct and not ct.startswith("image/") and ct not in (
@@ -617,4 +668,5 @@ def analyze_monitoring_frame(
     ):
         raise ValueError("الصورة غير صالحة.")
 
-    return _run_gemini_monitoring(image_bytes, camera_name, location)
+    from app.services.yolo_monitoring_service import analyze_frame_yolo  # noqa: PLC0415
+    return analyze_frame_yolo(image_bytes, camera_name, location)

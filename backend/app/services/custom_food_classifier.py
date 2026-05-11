@@ -105,7 +105,6 @@ def _load_torch_model(weights_path: Path, num_classes: int) -> Any:
 
 
 def _preprocess_pil(img: Image.Image) -> Any:
-    import torch
     from torchvision import transforms
 
     t = transforms.Compose(

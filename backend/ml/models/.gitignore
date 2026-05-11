@@ -1,0 +1,5 @@
+# YOLO model weights — large binary files, do not commit.
+# Run  python3 ml/download_ppe_model.py  to recreate.
+*.pt
+*.onnx
+*.torchscript

@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -17,6 +19,8 @@ class MonitoringViolationOut(BaseModel):
     reason_ar: str
     description: str = ""   # human-readable Arabic description (same as reason_ar)
     status: str = "new"     # lifecycle status: new | open | resolved
+    person_index: int | None = None
+    alias_of: str | None = None
 
 
 class MonitoringAnalyzeResponse(BaseModel):
@@ -32,3 +36,4 @@ class MonitoringAnalyzeResponse(BaseModel):
     violations: list[MonitoringViolationOut]
     alerts_created: int = Field(default=0, ge=0)
     summary: str = ""
+    frame_report: dict[str, Any] | None = None

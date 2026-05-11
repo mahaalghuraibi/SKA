@@ -37,21 +37,28 @@ export default function DishFilters({
   return (
     <>
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-white/10 pb-4">
-        <h3 className="text-xl font-bold tracking-tight text-white">
-          البحث والتصفية <span className="ms-2 text-[1.1em] opacity-90" aria-hidden>🔎</span>
-        </h3>
+      <header
+        className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-5"
+        data-aos="fade-down"
+        data-aos-duration="600"
+      >
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-sky/80">استعلام</p>
+          <h3 className="mt-1 text-xl font-bold tracking-tight text-white">
+            البحث والتصفية <span className="ms-2 text-[1.1em] opacity-90" aria-hidden>🔎</span>
+          </h3>
+        </div>
         <button
           type="button"
           onClick={onResetFilters}
-          className="rounded-lg border border-white/15 bg-[#0B1327]/80 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-brand-sky/40 hover:text-white"
+          className="rounded-xl border border-white/15 bg-[#0B1327]/90 px-4 py-2 text-xs font-semibold text-slate-200 shadow-sm transition hover:border-brand-sky/45 hover:bg-[#111f3a] hover:text-white"
         >
           إعادة الضبط
         </button>
       </header>
 
       {/* 1. Search input */}
-      <div className="relative">
+      <div className="relative" data-aos="fade-up" data-aos-delay="40">
         <span className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden>🔍</span>
         <input
           type="search"
@@ -61,13 +68,13 @@ export default function DishFilters({
             setQuickPreset(null);
           }}
           placeholder="ابحث باسم الطبق…"
-          className="w-full rounded-xl border border-white/15 bg-[#0B1327]/80 py-3 pe-4 ps-9 text-base text-slate-100 outline-none transition focus:border-brand-sky/60 focus:ring-2 focus:ring-brand-sky/20"
+          className="w-full rounded-xl border border-white/12 bg-[#0B1327]/85 py-3.5 pe-4 ps-10 text-base text-slate-100 shadow-inner shadow-black/20 outline-none transition focus:border-brand-sky/55 focus:ring-2 focus:ring-brand-sky/18"
         />
       </div>
 
       {/* 2. Status filter pills */}
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-slate-500">الحالة</p>
+      <div className="space-y-2.5" data-aos="fade-up" data-aos-delay="80">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">الحالة</p>
         <div className="flex flex-wrap gap-2">
           {[
             { id: "all",            label: "الكل" },
@@ -79,10 +86,10 @@ export default function DishFilters({
               key={b.id}
               type="button"
               onClick={() => { setFilterStatus(b.id); setQuickPreset(null); }}
-              className={`rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+              className={`rounded-full border px-3.5 py-2 text-xs font-semibold transition ${
                 filterStatus === b.id
-                  ? "border-brand-sky/60 bg-brand/30 text-sky-100 ring-1 ring-brand-sky/55"
-                  : "border-white/12 bg-[#0B1327]/80 text-slate-300 hover:border-brand-sky/30"
+                  ? "border-brand-sky/60 bg-brand/35 text-sky-100 shadow-[0_0_20px_-8px_rgba(56,189,248,0.45)] ring-1 ring-brand-sky/50"
+                  : "border-white/12 bg-[#0B1327]/85 text-slate-300 hover:border-brand-sky/35 hover:bg-[#0f1c38]"
               }`}
             >
               {b.label}
@@ -92,8 +99,8 @@ export default function DishFilters({
       </div>
 
       {/* 3. Quick preset pills */}
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-slate-500">فلتر سريع</p>
+      <div className="space-y-2.5" data-aos="fade-up" data-aos-delay="120">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">فلتر سريع</p>
         <div className="flex flex-wrap gap-2">
           {[
             { id: "all",     label: "الكل" },
@@ -110,10 +117,10 @@ export default function DishFilters({
                 if (b.id === "mostQty") { setQuickPreset("mostQty"); setSortKey("qtyDesc"); return; }
                 setQuickPreset(b.id);
               }}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+              className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
                 (b.id === "all" && !quickPreset && filtersAreDefault) || quickPreset === b.id
-                  ? "border-brand-sky/50 bg-brand-sky/15 text-brand-sky"
-                  : "border-white/12 bg-[#0B1327]/80 text-slate-300 hover:border-brand-sky/30"
+                  ? "border-brand-sky/55 bg-brand-sky/18 text-brand-sky shadow-[0_0_18px_-10px_rgba(56,189,248,0.5)]"
+                  : "border-white/12 bg-[#0B1327]/85 text-slate-300 hover:border-brand-sky/35 hover:bg-[#0f1c38]"
               }`}
             >
               {b.label}
@@ -123,7 +130,7 @@ export default function DishFilters({
       </div>
 
       {/* 4. Date range */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-4" data-aos="fade-up" data-aos-delay="160">
         <div className="space-y-1">
           <label className="text-xs text-slate-400">من تاريخ</label>
           <input
@@ -173,8 +180,8 @@ export default function DishFilters({
       </div>
 
       {/* 5. Stats strip */}
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-slate-500">ملخص سريع</p>
+      <div className="space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">ملخص سريع</p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {[
             {
@@ -210,13 +217,15 @@ export default function DishFilters({
           ].map((s, i) => (
             <div
               key={i}
-              className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-[#0B1327]/55 px-3 py-3 sm:px-4 sm:py-3.5"
+              className="flex flex-col gap-2.5 rounded-2xl border border-white/12 bg-[linear-gradient(165deg,rgba(15,23,42,0.95)_0%,rgba(11,19,39,0.75)_100%)] px-3 py-3.5 shadow-inner shadow-black/20 transition hover:border-brand-sky/20 sm:px-4 sm:py-4"
+              data-aos="fade-up"
+              data-aos-delay={String(180 + i * 65)}
             >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] ring-1 ring-white/10">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-sky/[0.09] ring-1 ring-brand-sky/15">
                 {s.icon}
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{s.label}</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{s.label}</p>
                 <p className={`mt-1 break-words text-lg font-bold leading-tight tabular-nums sm:text-xl ${s.valueClass}`}>
                   {s.value}
                 </p>
@@ -227,7 +236,11 @@ export default function DishFilters({
       </div>
 
       {/* 6. Secondary filters grid */}
-      <div className="grid grid-cols-2 gap-3 rounded-2xl border border-white/8 bg-[#060d1f]/50 p-3 sm:grid-cols-4">
+      <div
+        className="grid grid-cols-2 gap-4 rounded-2xl border border-white/10 bg-[#060d1f]/65 p-4 shadow-inner shadow-black/25 sm:grid-cols-4"
+        data-aos="fade-up"
+        data-aos-delay="120"
+      >
         <div className="space-y-1">
           <label className="text-xs text-slate-400">نوع الطبق</label>
           <select

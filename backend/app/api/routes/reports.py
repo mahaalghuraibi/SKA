@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.api.rbac import require_roles
+from app.core.limiter import limiter
 
 router = APIRouter(
     prefix="/reports",
@@ -10,7 +11,8 @@ router = APIRouter(
 
 
 @router.get("/quality-summary")
-def quality_summary() -> dict:
+@limiter.limit("120/minute")
+def quality_summary(request: Request) -> dict:
     # Placeholder summary until reporting aggregation is wired.
     return {
         "compliance_rate": None,

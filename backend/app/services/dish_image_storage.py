@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import io
 import re
 import uuid
 from pathlib import Path
 
 from fastapi import HTTPException, status
+from PIL import Image, UnidentifiedImageError
 
 from app.core.config import settings
 
@@ -15,7 +17,7 @@ from app.core.config import settings
 _DATA_URL_RE = re.compile(r"^data:image/([\w+.-]+);base64,(.+)$", re.IGNORECASE | re.DOTALL)
 # Stored public path prefix (must match dishes router + api prefix).
 _FILES_PUBLIC_PREFIX = "/api/v1/dishes/files/"
-_FILENAME_RE = re.compile(r"^[a-f0-9]{32}\.(png|jpg|jpeg|webp|gif|bin)$", re.IGNORECASE)
+_FILENAME_RE = re.compile(r"^[a-f0-9]{32}\.(png|jpg|jpeg|webp|gif)$", re.IGNORECASE)
 _MAX_RAW_BYTES = 12_000_000
 
 
@@ -53,16 +55,29 @@ def materialize_dish_image_url(image_url: str) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="صورة الطبق كبيرة جدًا. جرّب صورة أصغر أو أقل دقة.",
         )
-    if "png" in mime:
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            im.load()
+            pil_fmt = (im.format or "").upper()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ملف الصورة غير صالح أو تالف.",
+        ) from exc
+
+    if "png" in mime and pil_fmt == "PNG":
         ext = "png"
-    elif "webp" in mime:
+    elif "webp" in mime and pil_fmt == "WEBP":
         ext = "webp"
-    elif "gif" in mime:
+    elif "gif" in mime and pil_fmt == "GIF":
         ext = "gif"
-    elif "jpeg" in mime or mime == "jpg":
+    elif ("jpeg" in mime or mime == "jpg") and pil_fmt in ("JPEG", "MPO"):
         ext = "jpg"
     else:
-        ext = "bin"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="نوع الصورة لا يطابق المحتوى. استخدم PNG أو JPEG أو WebP أو GIF.",
+        )
     fname = f"{uuid.uuid4().hex}.{ext}"
     dest = dish_media_dir() / fname
     dest.write_bytes(data)

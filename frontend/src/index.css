@@ -3,8 +3,9 @@
 @tailwind utilities;
 
 @layer base {
+  /* Native scroll — smooth + fixed body backgrounds cause main-thread jank on wheel. */
   html {
-    scroll-behavior: smooth;
+    scroll-behavior: auto;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
   }
@@ -14,6 +15,9 @@
     overflow-x: clip;
     background-color: #020617;
     color: #e2e8f0;
+    font-size: 15px;
+    line-height: 1.65;
+    letter-spacing: 0.01em;
     padding-inline-start: env(safe-area-inset-left, 0px);
     padding-inline-end: env(safe-area-inset-right, 0px);
     padding-block-start: env(safe-area-inset-top, 0px);
@@ -21,13 +25,7 @@
     background-image:
       radial-gradient(circle at 15% -10%, rgba(37, 99, 235, 0.2), transparent 40%),
       radial-gradient(circle at 85% 0%, rgba(56, 189, 248, 0.12), transparent 36%);
-    background-attachment: fixed;
-  }
-
-  @media (max-width: 640px) {
-    body {
-      background-attachment: scroll;
-    }
+    background-attachment: scroll;
   }
 }
 
@@ -38,6 +36,14 @@
 
 .nav-tab::selection {
   background: transparent;
+}
+
+/* Static backdrop for admin utility pages — avoids stacked infinite animations during scroll */
+.admin-page-static-bg {
+  background-color: #020617;
+  background-image:
+    radial-gradient(ellipse 100% 85% at 50% -25%, rgba(37, 99, 235, 0.14), transparent 55%),
+    radial-gradient(ellipse 65% 45% at 85% 95%, rgba(56, 189, 248, 0.06), transparent 50%);
 }
 
 /* —— Premium hero motion (CSS only) —— */

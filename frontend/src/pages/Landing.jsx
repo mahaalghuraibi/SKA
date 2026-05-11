@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import AOS from "aos";
+import "aos/dist/aos.css";
 import { Link } from "react-router-dom";
 import SKALogo from "../components/SKALogo.jsx";
+import { PLATFORM_BRAND, PUBLIC_PAGE_TITLES } from "../constants/branding.js";
 
 function IconCamera({ className }) {
   return (
@@ -63,8 +66,13 @@ function IconChart({ className }) {
 /** CSS-only futuristic kitchen / dashboard preview */
 function KitchenVisualMock() {
   return (
-    <div className="relative mx-auto aspect-[4/3] w-full max-w-lg lg:max-w-none lg:aspect-[5/4]">
-      <div className="absolute inset-0 rounded-2xl border border-white/10 bg-gradient-to-br from-slate-900/90 via-navy/80 to-brand/25 shadow-glass-lg backdrop-blur-xl">
+    <div
+      className="relative mx-auto aspect-[4/3] w-full max-w-lg lg:max-w-none lg:aspect-[5/4]"
+      data-aos="zoom-in"
+      data-aos-duration="900"
+      data-aos-delay="120"
+    >
+      <div className="absolute inset-0 rounded-2xl border border-white/12 bg-gradient-to-br from-slate-900/90 via-navy/80 to-brand/25 shadow-[0_0_40px_-12px_rgba(56,189,248,0.35)] shadow-glass-lg backdrop-blur-xl ring-1 ring-white/[0.06]">
         <div className="absolute inset-0 opacity-40 hero-grid-lines" />
         <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-t from-[#020617]/80 via-transparent to-brand-sky/5" />
         <div className="absolute inset-x-4 top-4 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 backdrop-blur-md">
@@ -97,6 +105,9 @@ function KitchenVisualMock() {
       <div
         className="absolute -end-2 top-[8%] z-10 max-w-[11rem] animate-stat-float rounded-xl border border-white/10 bg-white/5 p-3 shadow-glass backdrop-blur-xl sm:-end-4 sm:max-w-[13rem] sm:p-3.5"
         style={{ animationDelay: "-1s" }}
+        data-aos="fade-up"
+        data-aos-delay="380"
+        data-aos-duration="700"
       >
         <p className="text-[10px] font-medium text-slate-400">تسجيل الأطباق</p>
         <p className="mt-0.5 text-lg font-bold tabular-nums text-white sm:text-xl">
@@ -106,6 +117,9 @@ function KitchenVisualMock() {
       <div
         className="absolute -start-2 top-[38%] z-10 max-w-[11rem] animate-stat-float rounded-xl border border-white/10 bg-white/5 p-3 shadow-glass backdrop-blur-xl sm:-start-4 sm:max-w-[13rem]"
         style={{ animationDelay: "-2.5s" }}
+        data-aos="fade-up"
+        data-aos-delay="460"
+        data-aos-duration="700"
       >
         <p className="text-[10px] font-medium text-slate-400">تنبيهات اليوم</p>
         <p className="mt-0.5 text-lg font-bold tabular-nums text-accent-amber sm:text-xl">3</p>
@@ -113,6 +127,9 @@ function KitchenVisualMock() {
       <div
         className="absolute -end-1 bottom-[6%] z-10 max-w-[11rem] animate-stat-float rounded-xl border border-white/10 bg-white/5 p-3 shadow-glass backdrop-blur-xl sm:-end-3 sm:max-w-[13rem]"
         style={{ animationDelay: "-0.5s" }}
+        data-aos="fade-up"
+        data-aos-delay="540"
+        data-aos-duration="700"
       >
         <p className="text-[10px] font-medium text-slate-400">الالتزام بالجودة</p>
         <p className="mt-0.5 text-lg font-bold tabular-nums text-brand-sky sm:text-xl">
@@ -139,6 +156,30 @@ export default function LandingPage() {
     ],
     []
   );
+
+  useEffect(() => {
+    AOS.init({
+      duration: 820,
+      easing: "ease-out-cubic",
+      once: true,
+      offset: 56,
+      anchorPlacement: "top-bottom",
+      disable: () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    });
+    const id = requestAnimationFrame(() => {
+      AOS.refresh();
+    });
+    const refreshAos = () => AOS.refresh();
+    window.addEventListener("resize", refreshAos);
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener("resize", refreshAos);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.title = PUBLIC_PAGE_TITLES.home;
+  }, []);
 
   useEffect(() => {
     const getSections = () =>
@@ -250,7 +291,7 @@ export default function LandingPage() {
 
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <Link
-              to="/register"
+              to="/signup"
               className="inline-flex min-h-[40px] min-w-[7rem] items-center justify-center rounded-xl border border-white/15 bg-[rgba(15,23,42,0.72)] px-3 text-xs font-semibold text-slate-100 backdrop-blur-md transition hover:border-brand-sky/40 hover:bg-[#1a2644] sm:min-w-0 sm:px-4 sm:text-sm"
             >
               إنشاء حساب
@@ -302,29 +343,53 @@ export default function LandingPage() {
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-24 hero-bottom-bleed sm:h-28" />
 
           <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-4 shadow-glass-lg backdrop-blur-xl sm:p-6 md:p-8 lg:rounded-3xl lg:p-10 xl:p-12">
-              <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-12 xl:gap-16">
+            <div
+              className="relative overflow-hidden rounded-2xl border border-white/12 bg-[rgba(15,23,42,0.62)] p-4 shadow-[0_0_70px_-18px_rgba(56,189,248,0.22)] shadow-glass-lg backdrop-blur-2xl ring-1 ring-white/[0.06] sm:p-6 md:p-8 lg:rounded-3xl lg:p-10 xl:p-12"
+              data-aos="fade-up"
+              data-aos-duration="880"
+              data-aos-delay="40"
+            >
+              <div className="pointer-events-none absolute -left-32 top-1/2 h-64 w-64 -translate-y-1/2 rounded-full bg-brand-sky/10 blur-3xl" />
+              <div className="pointer-events-none absolute -right-24 top-0 h-48 w-48 rounded-full bg-blue-600/10 blur-3xl" />
+              <div className="relative grid items-center gap-10 lg:grid-cols-2 lg:gap-12 xl:gap-16">
                 <div className="order-2 text-start lg:order-1">
-                  <p className="text-sm font-medium text-cyan-300/90 sm:text-base">
-                    الرقابة والتوثيق الذكي للمطابخ
-                  </p>
-                  <h1 className="mt-4 text-3xl font-extrabold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl xl:text-[3.25rem] xl:leading-[1.15]">
-                    نظام SKA للرقابة والتوثيق الذكي للمطابخ
+                  <div
+                    className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-full border border-brand-sky/25 bg-brand-sky/10 px-3 py-1.5 text-xs font-semibold text-brand-sky sm:text-sm"
+                    data-aos="fade-up"
+                    data-aos-delay="80"
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-brand-sky shadow-[0_0_10px_rgba(56,189,248,0.65)]" aria-hidden />
+                    {PLATFORM_BRAND.taglineAr}
+                  </div>
+                  <h1
+                    className="mt-5 text-3xl font-extrabold leading-[1.12] tracking-tight text-white sm:text-4xl lg:text-5xl xl:text-[3.35rem]"
+                    data-aos="fade-up"
+                    data-aos-delay="140"
+                  >
+                    {PLATFORM_BRAND.nameAr}
                   </h1>
-                  <p className="mt-6 max-w-xl text-sm leading-relaxed text-slate-400 sm:text-base">
-                    لوحة مراقبة حديثة للمطابخ الاحترافية: رؤية ذكاء اصطناعي، تنبيهات
-                    فورية، وتوثيق أدق — بتجربة SaaS راقية وواجهة عربية كاملة.
+                  <p
+                    className="mt-6 max-w-xl text-sm font-normal leading-relaxed text-slate-400 sm:text-[1.05rem] sm:leading-relaxed"
+                    data-aos="fade-up"
+                    data-aos-delay="200"
+                  >
+                    لوحة مراقبة حديثة للمطابخ الاحترافية: رؤية ذكاء اصطناعي، تنبيهات فورية، وتوثيق أدق —
+                    بتجربة SaaS راقية وواجهة عربية كاملة مصممة لفرق الجودة والتشغيل.
                   </p>
-                  <div className="mt-8 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+                  <div
+                    className="mt-8 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
+                    data-aos="fade-up"
+                    data-aos-delay="260"
+                  >
                     <Link
-                      to="/register"
+                      to="/signup"
                       className="inline-flex min-h-[48px] items-center justify-center rounded-xl border-2 border-white/20 bg-[rgba(15,23,42,0.72)] px-8 text-sm font-semibold text-white backdrop-blur-md transition hover:border-brand-sky/50 hover:bg-[#1a2644] hover:shadow-glow-sm sm:min-h-[50px]"
                     >
                       إنشاء حساب
                     </Link>
                     <Link
                       to="/login"
-                      className="inline-flex min-h-[48px] items-center justify-center rounded-xl bg-brand px-8 text-sm font-semibold text-white shadow-lg shadow-brand/40 transition hover:bg-blue-600 hover:shadow-[0_0_40px_-8px_rgba(37,99,235,0.55)] sm:min-h-[50px]"
+                      className="inline-flex min-h-[48px] items-center justify-center rounded-xl bg-gradient-to-l from-brand via-blue-600 to-brand px-8 text-sm font-semibold text-white shadow-lg shadow-brand/45 transition hover:shadow-[0_0_42px_-6px_rgba(56,189,248,0.55)] sm:min-h-[50px]"
                     >
                       الدخول للمنصة
                     </Link>
@@ -335,9 +400,26 @@ export default function LandingPage() {
                       استعراض الخدمات
                     </a>
                   </div>
+
+                  <div
+                    className="mt-10 grid grid-cols-3 gap-3 border-t border-white/10 pt-8 sm:gap-6"
+                    data-aos="fade-up"
+                    data-aos-delay="340"
+                  >
+                    {[
+                      ["آمن", "اتصال مشفّر"],
+                      ["فوري", "تنبيهات لحظية"],
+                      ["عربي", "واجهة RTL كاملة"],
+                    ].map(([title, sub]) => (
+                      <div key={title} className="text-center sm:text-start">
+                        <p className="text-lg font-bold tabular-nums text-white sm:text-xl">{title}</p>
+                        <p className="mt-0.5 text-[11px] text-slate-500 sm:text-xs">{sub}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="order-1 scale-[1.1] drop-shadow-[0_18px_45px_rgba(56,189,248,0.16)] lg:order-2 lg:scale-[1.12]">
+                <div className="order-1 scale-[1.08] drop-shadow-[0_22px_50px_rgba(56,189,248,0.18)] sm:scale-[1.1] lg:order-2 lg:scale-[1.12]">
                   <KitchenVisualMock />
                 </div>
               </div>
@@ -346,22 +428,26 @@ export default function LandingPage() {
         </section>
 
         <section id="analytics" className="scroll-mt-28 border-t border-white/5 px-4 py-10 sm:scroll-mt-32 sm:px-6 sm:py-12 lg:px-8 lg:py-14">
-          <div className="mx-auto mb-6 max-w-7xl rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl sm:p-6">
+          <div
+            className="mx-auto mb-6 max-w-7xl rounded-2xl border border-white/12 bg-[rgba(15,23,42,0.65)] p-5 shadow-glass backdrop-blur-xl ring-1 ring-white/[0.05] sm:p-6 lg:p-8"
+            data-aos="fade-up"
+          >
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-sky/90">منصة خدمة تشغيلية</p>
-            <h2 className="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl">
-              SKA كمنصة رقابة وتشغيل جاهزة للإنتاج
+            <h2 className="mt-2 text-xl font-bold tracking-tight text-white sm:text-2xl lg:text-[1.65rem]">
+              منصة تشغيل ورقابة جاهزة للإنتاج
             </h2>
-            <p className="mt-2 max-w-3xl text-sm text-slate-400">
-              ليست مجرد واجهة تجريبية: تم تصميم SKA كبنية منصة متكاملة تجمع التسجيل، إدارة المستخدمين،
-              لوحة تشغيل مركزية، وخدمات مراقبة الجودة في تجربة واحدة.
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400">
+              بنية متكاملة تجمع التسجيل، إدارة المستخدمين، لوحة تشغيل مركزية، وخدمات مراقبة الجودة في تجربة واحدة متسقة.
             </p>
           </div>
 
           <div className="mx-auto mb-8 grid max-w-7xl gap-4 lg:grid-cols-3">
-            {serviceModules.map((module) => (
+            {serviceModules.map((module, mi) => (
               <article
                 key={module.title}
-                className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl transition hover:border-white/20"
+                className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-brand-sky/25 hover:shadow-[0_12px_40px_-24px_rgba(56,189,248,0.35)]"
+                data-aos="fade-up"
+                data-aos-delay={String(mi * 90)}
               >
                 <span className="inline-flex rounded-full border border-brand-sky/30 bg-brand-sky/10 px-2.5 py-1 text-[11px] font-semibold text-brand-sky">
                   {module.badge}
@@ -373,8 +459,11 @@ export default function LandingPage() {
           </div>
 
           <div className="mx-auto max-w-7xl">
-            <div className="mb-5 text-start sm:mb-6">
+            <div className="mb-5 text-start sm:mb-6" data-aos="fade-up">
               <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">لوحة تشغيل مباشرة</h2>
+              <p className="mt-2 max-w-2xl text-sm text-slate-500">
+                معاينة تخطيطية لمؤشرات التشغيل والتنبيهات — تركز فرق الجودة على ما يهم فعلاً.
+              </p>
             </div>
 
             <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -386,7 +475,9 @@ export default function LandingPage() {
               ].map((m, i) => (
                 <article
                   key={m.title}
-                  className={`landing-card-enter group relative overflow-hidden rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-white/20 ${i === 0 ? "landing-card-enter-d1" : i === 1 ? "landing-card-enter-d2" : i === 2 ? "landing-card-enter-d3" : "landing-card-enter-d4"}`}
+                  className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl transition duration-300 hover:-translate-y-0.5 hover:border-white/20"
+                  data-aos="fade-up"
+                  data-aos-delay={String(80 + i * 75)}
                 >
                   <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-brand-sky/10 to-transparent opacity-60" />
                   <div className="relative flex items-center justify-between gap-3">
@@ -400,7 +491,11 @@ export default function LandingPage() {
             </div>
 
             <div id="dashboard-preview" className="grid gap-6 lg:grid-cols-12">
-              <article className="landing-step-enter landing-step-enter-d1 rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl lg:col-span-7">
+              <article
+                className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl lg:col-span-7"
+                data-aos="fade-up"
+                data-aos-delay="60"
+              >
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <h3 className="text-lg font-bold text-white">نظرة عامة على الأداء</h3>
                   <span className="rounded-lg border border-white/10 bg-[#0B1327]/80 px-2 py-1 text-[10px] text-slate-400">آخر 7 أيام</span>
@@ -452,7 +547,11 @@ export default function LandingPage() {
                 </ul>
               </article>
 
-              <article className="landing-step-enter landing-step-enter-d3 rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl lg:col-span-2">
+              <article
+                className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl lg:col-span-2"
+                data-aos="fade-up"
+                data-aos-delay="180"
+              >
                 <h3 className="mb-4 text-lg font-bold text-white">حالة الأنظمة</h3>
                 <ul className="space-y-2.5">
                   {["الكاميرات", "أجهزة الاستشعار", "قاعدة البيانات", "الخوادم"].map((label) => (
@@ -468,7 +567,7 @@ export default function LandingPage() {
               </article>
             </div>
 
-            <div id="features" className="mt-6 grid scroll-mt-28 gap-4 sm:scroll-mt-32 sm:grid-cols-2 lg:grid-cols-4">
+            <div id="features" className="mt-8 grid scroll-mt-28 gap-4 sm:scroll-mt-32 sm:grid-cols-2 lg:grid-cols-4">
               {[
                 "أمان عالي",
                 "توثيق ذكي",
@@ -477,7 +576,9 @@ export default function LandingPage() {
               ].map((item, i) => (
                 <div
                   key={item}
-                  className={`landing-card-enter rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] px-4 py-3 text-center text-sm font-medium text-slate-300 shadow-glass backdrop-blur-xl ${i === 0 ? "landing-card-enter-d1" : i === 1 ? "landing-card-enter-d2" : i === 2 ? "landing-card-enter-d3" : "landing-card-enter-d4"}`}
+                  className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] px-4 py-3.5 text-center text-sm font-medium text-slate-300 shadow-glass backdrop-blur-xl transition hover:border-brand-sky/20 hover:text-white"
+                  data-aos="flip-up"
+                  data-aos-delay={String(50 + i * 70)}
                 >
                   {item}
                 </div>
@@ -488,17 +589,19 @@ export default function LandingPage() {
 
         <section id="reports" className="scroll-mt-28 border-t border-white/10 px-4 py-10 sm:scroll-mt-32 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">
-            <div className="mb-5 text-start sm:mb-6">
+            <div className="mb-5 text-start sm:mb-6" data-aos="fade-up">
               <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">خطة الجاهزية والتشغيل</h2>
-              <p className="mt-2 text-sm text-slate-400">
+              <p className="mt-2 text-sm leading-relaxed text-slate-400">
                 مسار واضح للانتقال من الإعداد الأولي إلى منصة متابعة يومية قابلة للتوسع.
               </p>
             </div>
             <div id="dish-documentation" className="grid scroll-mt-28 gap-4 sm:scroll-mt-32 md:grid-cols-3">
-              {readinessSteps.map((step) => (
+              {readinessSteps.map((step, si) => (
                 <article
                   key={step.title}
-                  className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl"
+                  className="rounded-2xl border border-white/10 bg-[rgba(15,23,42,0.72)] p-5 shadow-glass backdrop-blur-xl transition hover:border-white/18"
+                  data-aos="fade-up"
+                  data-aos-delay={String(si * 100)}
                 >
                   <h3 className="text-base font-semibold text-white">{step.title}</h3>
                   <p className="mt-2 text-sm leading-relaxed text-slate-400">{step.detail}</p>
@@ -511,18 +614,17 @@ export default function LandingPage() {
         <footer className="scroll-mt-24 border-t border-white/10 bg-[#0B1120] px-4 py-12 sm:px-6 sm:py-14 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <div className="mb-10 flex flex-col gap-8 border-b border-white/10 pb-10 md:flex-row md:items-start md:justify-between md:gap-12">
-              <div className="max-w-lg">
+              <div className="max-w-lg" data-aos="fade-up">
                 <div className="mb-4">
                   <SKALogo />
                 </div>
                 <h3 className="mb-2 text-base font-semibold text-white sm:text-lg">حول المنصة</h3>
                 <p className="text-sm leading-relaxed text-slate-400 sm:text-[15px]">
-                  SKA منصة تحليلات مطابخ ذكية تجمع بين الرؤية الحاسوبية والبيانات
-                  التشغيلية لدعم السلامة الغذائية والامتثال وتحسين جودة الخدمة في
-                  بيئات الطهي الاحترافية.
+                  {PLATFORM_BRAND.nameAr} تجمع بين الرؤية الحاسوبية والبيانات التشغيلية لدعم السلامة الغذائية والامتثال
+                  وتحسين جودة الخدمة في بيئات الطهي الاحترافية.
                 </p>
               </div>
-              <div className="flex flex-col gap-2 text-sm">
+              <div className="flex flex-col gap-2 text-sm" data-aos="fade-up" data-aos-delay="80">
                 <span className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   روابط سريعة
                 </span>
@@ -540,8 +642,8 @@ export default function LandingPage() {
                 </Link>
               </div>
             </div>
-            <p className="text-center text-[13px] text-slate-500">
-              © {new Date().getFullYear()} SKA — Smart Kitchen Analytics
+            <p className="text-center text-[13px] text-slate-500" data-aos="fade-in">
+              © {new Date().getFullYear()} {PLATFORM_BRAND.nameAr}
             </p>
           </div>
         </footer>

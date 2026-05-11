@@ -1,3 +1,4 @@
+import { memo } from "react";
 import FoodImageThumb from "../shared/FoodImageThumb.jsx";
 import { staffStatusTone, dishRecordThumbSrc } from "../../utils/dishHelpers.js";
 import { formatConfidencePercentDisplay } from "../../utils/confidence.js";
@@ -30,7 +31,7 @@ function IconTrash({ className }) {
   );
 }
 
-export default function DishCard({ record, highlighted, onEdit, onDelete }) {
+function DishCard({ record, highlighted, onEdit, onDelete, aosListIndex }) {
   const reviewBorder = record.needsReviewBadge
     ? "border-amber-400/35 ring-1 ring-amber-400/20"
     : "";
@@ -46,10 +47,15 @@ export default function DishCard({ record, highlighted, onEdit, onDelete }) {
       ? formatConfidencePercentDisplay(record.confidenceRatio)
       : null;
 
+  const aosDelay = aosListIndex != null ? String(Math.min(aosListIndex * 55, 440)) : undefined;
+
   return (
     <li
       id={`dish-row-${record.rawId}`}
-      className={`group rounded-2xl border bg-[#060d1f]/90 p-4 shadow-md transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/25 sm:p-5 lg:p-6 ${reviewBorder || trustBorder} ${hl}`}
+      className={`group rounded-2xl border bg-[#060d1f]/90 p-4 shadow-md backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-white/18 hover:shadow-lg hover:shadow-black/30 sm:p-5 lg:p-6 ${reviewBorder || trustBorder} ${hl}`}
+      {...(aosListIndex != null
+        ? { "data-aos": "fade-up", "data-aos-delay": aosDelay }
+        : {})}
     >
       <div className="flex gap-4 sm:gap-5">
         <FoodImageThumb
@@ -155,3 +161,5 @@ export default function DishCard({ record, highlighted, onEdit, onDelete }) {
     </li>
   );
 }
+
+export default memo(DishCard);

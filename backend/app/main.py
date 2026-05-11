@@ -1,21 +1,52 @@
 from contextlib import asynccontextmanager
 import logging
 import os
+import traceback
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.exc import SQLAlchemyError
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import app.models  # noqa: F401 - register ORM mappers before routes import User
 from app.api.router import api_router
-from app.core.config import settings
+from app.core.config import settings, validate_settings_for_startup
+from app.core.limiter import limiter
 from app.db.session import init_db
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 logger = logging.getLogger(__name__)
+
+_DEV_CORS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5178",
+    "http://127.0.0.1:5178",
+]
+
+
+def _cors_allow_origins() -> list[str]:
+    raw = str(getattr(settings, "CORS_ALLOW_ORIGINS_RAW", "") or "").strip()
+    if settings.is_production:
+        if not raw:
+            logger.warning(
+                "CORS_ALLOW_ORIGINS is empty in production — browsers cannot call this API cross-origin until set.",
+            )
+            return []
+        return [p.strip() for p in raw.split(",") if p.strip()]
+    if not raw:
+        return list(_DEV_CORS)
+    return [p.strip() for p in raw.split(",") if p.strip()]
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # ── Key source resolution ──────────────────────────────────────────────────
+    validate_settings_for_startup()
+
     _mon_dedicated = bool((os.getenv("MONITORING_GEMINI_API_KEY") or "").strip())
     _dish_dedicated = bool((os.getenv("DISH_GEMINI_API_KEY") or "").strip())
     _legacy_set = bool((os.getenv("GEMINI_API_KEY") or "").strip())
@@ -29,42 +60,125 @@ async def lifespan(_app: FastAPI):
     dish_model = (settings.DISH_GEMINI_MODEL or settings.GEMINI_VISION_MODEL or "").strip()
     demo_mode = settings.MONITORING_AI_DEMO_MODE
 
+    yolo_path = (settings.YOLO_MODEL_PATH or "").strip()
+    yolo_status = yolo_path if yolo_path else "NOT_CONFIGURED"
+    yolo_warning = "" if yolo_path else "  *** YOLO monitoring model missing ***"
+    waste_path = (settings.YOLO_WASTE_MODEL_PATH or "").strip()
+    waste_status = waste_path if waste_path else "NOT_CONFIGURED"
     startup_lines = [
-        f"  MONITORING_GEMINI_API_KEY_set={monitoring_key_set}  source={monitoring_key_src}",
-        f"  MONITORING_GEMINI_MODEL={monitoring_model or '(none)'}",
+        f"  YOLO_MODEL_PATH={yolo_status}",
+        f"  YOLO_WASTE_MODEL_PATH={waste_status}",
         f"  DISH_GEMINI_API_KEY_set={dish_key_set}  source={dish_key_src}",
         f"  DISH_GEMINI_MODEL={dish_model or '(none)'}",
+        f"  MONITORING_GEMINI_API_KEY_set={monitoring_key_set}  source={monitoring_key_src}  (unused — YOLO handles monitoring)",
+        f"  MONITORING_GEMINI_MODEL={monitoring_model or '(none)'}  (unused)",
         f"  MONITORING_AI_DEMO_MODE={demo_mode}",
         f"  ROBOFLOW_KEY_set={bool(settings.ROBOFLOW_API_KEY.strip())}",
     ]
     for line in startup_lines:
-        print(line, flush=True)
         logger.info(line.strip())
+    if yolo_warning:
+        logger.warning(yolo_warning.strip())
 
     init_db()
     yield
 
 
-app = FastAPI(title="SKA Backend", lifespan=lifespan)
-# Swagger UI handles form-urlencoded request bodies more reliably with OpenAPI 3.0.x.
+_docs_url = None if settings.is_production else "/docs"
+_redoc_url = None if settings.is_production else "/redoc"
+_openapi_url = None if settings.is_production else "/openapi.json"
+
+app = FastAPI(
+    title=getattr(settings, "PROJECT_NAME", "API"),
+    lifespan=lifespan,
+    docs_url=_docs_url,
+    redoc_url=_redoc_url,
+    openapi_url=_openapi_url,
+)
 app.openapi_version = "3.0.2"
+
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    _ = exc  # slowapi carries limit detail; do not echo to clients in production
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": "تم تجاوز الحد المسموح للطلبات. حاول بعد قليل."},
+    )
+
+if settings.allowed_hosts_list:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
+
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    enable_hsts=bool(settings.ENABLE_HSTS),
+    hsts_max_age=int(settings.HSTS_MAX_AGE),
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5178",
-        "http://127.0.0.1:5178",
-    ],
+    allow_origins=_cors_allow_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ],
 )
 
 app.include_router(api_router)
 
 
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if settings.is_production:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": "طلب غير صالح"},
+        )
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()},
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError) -> JSONResponse:
+    logger.warning("database error path=%s type=%s", request.url.path, type(exc).__name__)
+    if settings.is_production:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "حدث خطأ أثناء معالجة الطلب"},
+        )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("unhandled error path=%s", request.url.path)
+    if settings.is_production:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "حدث خطأ داخلي"},
+        )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": f"{type(exc).__name__}",
+            "trace": traceback.format_exc()[-4000:],
+        },
+    )
+
+
 @app.get("/")
 def root() -> dict[str, str]:
-    return {"message": "SKA Backend Running"}
+    return {"message": getattr(settings, "PROJECT_NAME", "API")}

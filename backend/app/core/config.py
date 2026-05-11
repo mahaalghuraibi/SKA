@@ -21,7 +21,13 @@ def _parse_bool_env(name: str, default: bool = False) -> bool:
 
 
 class Settings:
-    PROJECT_NAME: str = os.getenv("PROJECT_NAME", "SKA Backend")
+    PROJECT_NAME: str = os.getenv("PROJECT_NAME", "Quality Platform API")
+    # production | development — controls error detail exposure
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development").strip().lower()
+    # Comma-separated origins; empty → dev defaults applied in main.py
+    CORS_ALLOW_ORIGINS_RAW: str = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+    # Max POST body for monitoring frame analyze (bytes)
+    MONITORING_UPLOAD_MAX_BYTES: int = int(os.getenv("MONITORING_UPLOAD_MAX_BYTES", str(8 * 1024 * 1024)))
     _default_sqlite_path: str = (_backend_dir / "test.db").resolve().as_posix()
     _raw_database_url: str = os.getenv(
         "DATABASE_URL",
@@ -75,6 +81,11 @@ class Settings:
         os.getenv("GEMINI_VISION_MODEL", "gemini-2.0-flash"),
     )
     YOLO_MODEL_PATH: str = os.getenv("YOLO_MODEL_PATH", "")
+    # Standard COCO person detector (yolov8n/s); worker localization separate from PPE weights.
+    # Default: backend/ml/models/yolov8n.pt if present, else Ultralytics auto-download "yolov8n.pt".
+    PERSON_MODEL_PATH: str = os.getenv("PERSON_MODEL_PATH", "").strip()
+    # Optional second weights trained on trash / bins / floor litter (improves hygiene alerts).
+    YOLO_WASTE_MODEL_PATH: str = os.getenv("YOLO_WASTE_MODEL_PATH", "").strip()
     YOLO_CONF_THRESHOLD: float = float(os.getenv("YOLO_CONF_THRESHOLD", "0.35"))
     FOOD101_HF_MODEL_ID: str = os.getenv("FOOD101_HF_MODEL_ID", "nateraw/vit-base-food101")
     # Optional on-prem 9-class ResNet18 (see ml/custom_food/README.md). Inference only; no auto-train.
@@ -90,6 +101,41 @@ class Settings:
     MONITORING_IMAGE_DATA_URL_MAX_CHARS: int = int(os.getenv("MONITORING_IMAGE_DATA_URL_MAX_CHARS", "400000"))
     # Production AI mode: stricter validation, real photos only, no demo paths.
     PRODUCTION_AI_MODE: bool = _parse_bool_env("PRODUCTION_AI_MODE", False)
+    # TrustedHostMiddleware — comma-separated hosts; empty disables host validation (typical behind nginx).
+    ALLOWED_HOSTS_RAW: str = os.getenv("ALLOWED_HOSTS", "").strip()
+    # Send Strict-Transport-Security only when the API is reachable exclusively via HTTPS.
+    ENABLE_HSTS: bool = _parse_bool_env("ENABLE_HSTS", False)
+    HSTS_MAX_AGE: int = int(os.getenv("HSTS_MAX_AGE", "63072000"))
+
+    @property
+    def is_production(self) -> bool:
+        return str(self.ENVIRONMENT).strip().lower() == "production"
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        raw = (self.ALLOWED_HOSTS_RAW or "").strip()
+        if not raw:
+            return []
+        return [h.strip() for h in raw.split(",") if h.strip()]
+
+    @property
+    def effective_dev_auth_bypass(self) -> bool:
+        """Never honor DEV_AUTH_BYPASS in production (privilege escalation guard)."""
+        if self.is_production:
+            return False
+        return bool(self.DEV_AUTH_BYPASS)
 
 
 settings = Settings()
+
+
+def validate_settings_for_startup() -> None:
+    """Fail fast in production when JWT signing material is unsafe."""
+    if not settings.is_production:
+        return
+    key = (settings.SECRET_KEY or "").strip()
+    weak = {"", "change-me", "changeme", "secret", "test", "dev"}
+    if len(key) < 32 or key.lower() in weak:
+        raise RuntimeError(
+            "ENVIRONMENT=production requires SECRET_KEY to be a strong random value (≥32 characters, not a placeholder)."
+        )

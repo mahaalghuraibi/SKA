@@ -1,3 +1,7 @@
+/**
+ * Auth tokens in localStorage are visible to same-origin script; never store API server secrets
+ * in the frontend bundle. All role checks must be re-validated by the API (see AdminRoute + /users/me).
+ */
 /** localStorage key for JWT from POST /api/v1/auth/login */
 export const ACCESS_TOKEN_KEY = "access_token";
 /** localStorage key for current user role from GET /api/v1/users/me (or /me fallback) */

@@ -13,10 +13,13 @@ export default function RecordsList({
   return (
     <>
       <div className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
-        <h3 className="text-xl font-bold tracking-tight text-white sm:text-[1.35rem]">
-          سجل الأطباق <span className="ms-2 text-[1.05em] opacity-90" aria-hidden>📋</span>
-        </h3>
-        <div className="text-sm text-slate-400">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">السجل</p>
+          <h3 className="mt-1 text-xl font-bold tracking-tight text-white sm:text-[1.35rem]">
+            سجل الأطباق <span className="ms-2 text-[1.05em] opacity-90" aria-hidden>📋</span>
+          </h3>
+        </div>
+        <div className="rounded-xl border border-white/[0.07] bg-[#060d1f]/55 px-3 py-2 text-sm text-slate-400 sm:text-start">
           <p>
             عرض <span className="font-semibold text-slate-200">{displayedRecords.length}</span> من{" "}
             <span className="font-semibold text-slate-200">{staffRecords.length}</span> سجلًا
@@ -49,9 +52,10 @@ export default function RecordsList({
         </div>
       ) : (
         <ul className="space-y-5 sm:space-y-6">
-          {displayedRecords.map((record) => (
+          {displayedRecords.map((record, idx) => (
             <DishCard
               key={record.id}
+              aosListIndex={idx}
               record={record}
               highlighted={highlightRawId === record.rawId}
               onEdit={onEdit}

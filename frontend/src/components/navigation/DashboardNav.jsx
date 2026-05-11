@@ -1,69 +1,25 @@
+import { Link, useLocation } from "react-router-dom";
 import SKALogo from "../SKALogo.jsx";
-import { useEffect, useState } from "react";
+import { navItemIsActive } from "../../constants/appRoutes.js";
 
+/**
+ * Top dashboard navigation — clean path-based URLs (no hash routing).
+ * Active tab derives from `location.pathname` for deep links & refresh-safe UX.
+ */
 export default function DashboardNav({
   role,
   navLinks,
-  activeStaffSection,
-  activeSection,
-  currentHash,
   mobileNavOpen,
   setMobileNavOpen,
   logout,
   dashboardTitle,
 }) {
-  const [liveHash, setLiveHash] = useState(
-    currentHash || (typeof window !== "undefined" ? window.location.hash : "")
-  );
-
-  useEffect(() => {
-    setLiveHash(currentHash || (typeof window !== "undefined" ? window.location.hash : ""));
-  }, [currentHash]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const syncHash = () => setLiveHash(window.location.hash || "");
-    window.addEventListener("hashchange", syncHash);
-    window.addEventListener("popstate", syncHash);
-    window.addEventListener("scroll", syncHash, { passive: true });
-    let rafId = 0;
-    const watchHash = () => {
-      const h = window.location.hash || "";
-      setLiveHash((prev) => (prev === h ? prev : h));
-      rafId = window.requestAnimationFrame(watchHash);
-    };
-    rafId = window.requestAnimationFrame(watchHash);
-    syncHash();
-    return () => {
-      window.removeEventListener("hashchange", syncHash);
-      window.removeEventListener("popstate", syncHash);
-      window.removeEventListener("scroll", syncHash);
-      window.cancelAnimationFrame(rafId);
-    };
-  }, []);
-
-  const jumpToSection = (sectionId) => {
-    if (!sectionId || typeof window === "undefined") return;
-    const wantedHash = `#${sectionId}`;
-    if (window.location.hash !== wantedHash) {
-      window.location.hash = wantedHash;
-      setLiveHash(wantedHash);
-    }
-    const scrollNow = () => {
-      const el = document.getElementById(sectionId);
-      if (!el) return false;
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-      return true;
-    };
-    if (scrollNow()) return;
-    // If section mounts a bit later (async records), retry once.
-    window.setTimeout(scrollNow, 90);
-  };
+  const location = useLocation();
+  const pathname = location.pathname.split("?")[0];
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0F172A]/90 shadow-[0_8px_30px_-18px_rgba(2,6,23,0.9)] backdrop-blur-xl supports-[backdrop-filter]:bg-[#0F172A]/80">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-3 py-2 sm:gap-3 sm:px-6 lg:px-8">
-        {/* Left: hamburger + avatar + title */}
+    <header className="fixed inset-x-0 top-0 z-[60] w-full border-b border-white/10 bg-[#0f172a]/97 shadow-[0_4px_16px_-10px_rgba(2,6,23,0.75)] backdrop-blur-[2px]">
+      <div className="mx-auto flex min-h-14 max-w-7xl items-center justify-between gap-2 px-3 py-2 sm:min-h-16 sm:gap-3 sm:px-6 lg:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 lg:flex-none">
           <button
             type="button"
@@ -83,7 +39,9 @@ export default function DashboardNav({
               </span>
             )}
           </button>
-          <SKALogo className="inline-flex" />
+          <Link to={role === "staff" ? "/dashboard" : "/analytics"} className="inline-flex" aria-label="الرئيسية">
+            <SKALogo className="inline-flex" />
+          </Link>
           {role === "staff" ? null : (
             <span className="hidden rounded-full border border-white/15 bg-white/5 px-2 py-1 text-[10px] font-medium text-slate-300 md:inline-flex">
               {dashboardTitle}
@@ -91,42 +49,13 @@ export default function DashboardNav({
           )}
         </div>
 
-        {/* Desktop nav links */}
         <nav className="hidden flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 lg:flex" aria-label="التنقل الرئيسي">
           {navLinks.map((item) => {
-            const normalizeHash = (hash) => (hash === "#notifications" ? "#alerts" : hash);
-            const wantedHash = item.sectionId ? normalizeHash(`#${item.sectionId}`) : "";
-            const normalizedCurrentHash = normalizeHash(liveHash || "");
-            const hashBasedMode = [
-              "#analytics",
-              "#cameras",
-              "#reports",
-              "#dish-reviews",
-              "#alerts",
-              "#employees",
-              "#settings",
-              "#section-dish-doc",
-              "#section-search-filter",
-              "#section-dish-records",
-            ].includes(normalizedCurrentHash);
-            const hashActive = wantedHash && normalizedCurrentHash === wantedHash;
-            const sectionActive =
-              item.sectionId != null
-                ? role === "staff"
-                  ? activeStaffSection === item.sectionId
-                  : activeSection === item.sectionId
-                : false;
-            const isActive = hashBasedMode ? Boolean(hashActive) : Boolean(sectionActive);
+            const isActive = navItemIsActive(pathname, role, item);
             return (
-              <a
-                key={item.sectionId || item.href}
-                href={item.href}
-                onClick={(e) => {
-                  if (item.sectionId) {
-                    e.preventDefault();
-                    jumpToSection(item.sectionId);
-                  }
-                }}
+              <Link
+                key={item.sectionId || item.to}
+                to={item.to}
                 aria-current={isActive ? "page" : undefined}
                 className={`nav-tab whitespace-nowrap rounded-[10px] px-3 py-2 text-sm font-medium transition ${
                   isActive
@@ -142,12 +71,11 @@ export default function DashboardNav({
                     </span>
                   ) : null}
                 </span>
-              </a>
+              </Link>
             );
           })}
         </nav>
 
-        {/* Right: logout */}
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
           <button
             type="button"
@@ -160,7 +88,6 @@ export default function DashboardNav({
         </div>
       </div>
 
-      {/* Mobile nav dropdown */}
       <nav
         id="dashboard-mobile-nav"
         className={`border-t border-white/10 bg-[#0F172A]/95 lg:hidden ${mobileNavOpen ? "block" : "hidden"}`}
@@ -168,40 +95,12 @@ export default function DashboardNav({
       >
         <div className="mx-auto flex max-w-7xl flex-col gap-1 px-3 py-3 sm:px-6">
           {navLinks.map((item) => {
-            const normalizeHash = (hash) => (hash === "#notifications" ? "#alerts" : hash);
-            const wantedHash = item.sectionId ? normalizeHash(`#${item.sectionId}`) : "";
-            const normalizedCurrentHash = normalizeHash(liveHash || "");
-            const hashBasedMode = [
-              "#analytics",
-              "#cameras",
-              "#reports",
-              "#dish-reviews",
-              "#alerts",
-              "#employees",
-              "#settings",
-              "#section-dish-doc",
-              "#section-search-filter",
-              "#section-dish-records",
-            ].includes(normalizedCurrentHash);
-            const hashActive = wantedHash && normalizedCurrentHash === wantedHash;
-            const sectionActive =
-              item.sectionId != null
-                ? role === "staff"
-                  ? activeStaffSection === item.sectionId
-                  : activeSection === item.sectionId
-                : false;
-            const isActive = hashBasedMode ? Boolean(hashActive) : Boolean(sectionActive);
+            const isActive = navItemIsActive(pathname, role, item);
             return (
-              <a
-                key={item.sectionId || item.href}
-                href={item.href}
-                onClick={(e) => {
-                  if (item.sectionId) {
-                    e.preventDefault();
-                    jumpToSection(item.sectionId);
-                  }
-                  setMobileNavOpen(false);
-                }}
+              <Link
+                key={item.sectionId || item.to}
+                to={item.to}
+                onClick={() => setMobileNavOpen(false)}
                 aria-current={isActive ? "page" : undefined}
                 className={`nav-tab rounded-[10px] px-3 py-2 text-sm font-medium transition ${
                   isActive
@@ -217,7 +116,7 @@ export default function DashboardNav({
                     </span>
                   ) : null}
                 </span>
-              </a>
+              </Link>
             );
           })}
         </div>
