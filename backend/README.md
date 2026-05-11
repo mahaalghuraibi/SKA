@@ -93,6 +93,22 @@ Production-style example (adjust workers & SSL termination):
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
+### Render deployment | نشر Render
+
+Use Render’s **`PORT`** env var (injected by the platform). **Start command:**
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port=$PORT
+```
+
+**Pre-deploy command** (ensure admin from `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`):
+
+```bash
+python scripts/create_admin.py
+```
+
+See repo root **`render.yaml`** for a Blueprint template.
+
 ---
 
 ## Security features | الأمان

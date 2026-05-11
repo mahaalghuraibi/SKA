@@ -106,6 +106,24 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 API base (local): `http://127.0.0.1:8000` · OpenAPI UI: `/docs` when **not** in `ENVIRONMENT=production`.
 
+### Render deployment | نشر Render
+
+Root directory on Render: **`backend/`**.
+
+**Start command:**
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port=$PORT
+```
+
+**Pre-deploy command** (creates or updates admin from **`SEED_ADMIN_EMAIL`** / **`SEED_ADMIN_PASSWORD`**):
+
+```bash
+python scripts/create_admin.py
+```
+
+Blueprint example: [`render.yaml`](render.yaml) (`preDeployCommand` + `startCommand` as above). Customize the service name, `envVars`, and attach your PostgreSQL database in the Render dashboard.
+
 ### Frontend setup
 
 ```bash
