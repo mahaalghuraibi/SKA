@@ -72,8 +72,9 @@ The SPA talks to the API via **relative paths** (e.g. `/api/v1/...`). No API key
 
 | Concern | Notes |
 |---------|--------|
-| **API base (production)** | Set **`VITE_API_BASE_URL`** to your backend origin (no trailing slash), e.g. `https://taeen-quality-platform.onrender.com`. See `frontend/.env.example`. |
-| **API origin** | Dev: Vite `server.proxy` targets `http://127.0.0.1:8000`. Production static host: must set **`VITE_API_BASE_URL`** or all `/api/v1/...` calls hit the wrong origin. |
+| **API base (production)** | **Preferred:** set **`VITE_API_BASE_URL`** on Render at **build** time (no trailing slash), e.g. `https://taeen-quality-platform.onrender.com`. See `frontend/.env.example`. |
+| **Emergency override** | In the browser console: `localStorage.setItem('ska_api_base','https://taeen-quality-platform.onrender.com'); location.reload()` — then redeploy with proper `VITE_API_BASE_URL` when you can rebuild. |
+| **API origin** | Dev: Vite `server.proxy` targets `http://127.0.0.1:8000`. Production static host: without `VITE_API_BASE_URL`, same-origin `/api` calls fail unless a built-in fallback matches your host. |
 | **Secrets** | Never commit `.env` with production secrets; use CI/host env only if you introduce `VITE_*` vars later. |
 
 ---

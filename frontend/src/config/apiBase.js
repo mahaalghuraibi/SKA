@@ -1,7 +1,12 @@
 /**
  * Production: static frontend on Render (or CDN) calls API on another host.
- * Set at build time: VITE_API_BASE_URL=https://taeen-quality-platform.onrender.com
- * Dev: omit — Vite proxies `/api` to the backend (see vite.config.js).
+ *
+ * Priority:
+ * 1) Build-time: VITE_API_BASE_URL (recommended on Render Static Site → Environment → Build)
+ * 2) Runtime: localStorage key `ska_api_base` = full origin, e.g. https://taeen-quality-platform.onrender.com
+ * 3) Fallback: known Render hostname pairing (only when env unset — avoids silent same-origin /api failures)
+ *
+ * Dev: leave unset — Vite proxies `/api` to the backend (see vite.config.js).
  */
 function normalizeBase(raw) {
   return String(raw ?? "")
@@ -9,7 +14,31 @@ function normalizeBase(raw) {
     .replace(/\/+$/, "");
 }
 
-export const API_BASE_URL = normalizeBase(import.meta.env.VITE_API_BASE_URL);
+function storageApiBase() {
+  if (typeof window === "undefined") return "";
+  try {
+    const v = window.localStorage?.getItem("ska_api_base");
+    if (v && /^https?:\/\//i.test(v)) return normalizeBase(v);
+  } catch {
+    /* private mode */
+  }
+  return "";
+}
+
+/** Last-resort when VITE_API_BASE_URL was not baked into the build. */
+function inferProductionApiBase() {
+  if (typeof window === "undefined") return "";
+  if (!import.meta.env.PROD) return "";
+  const h = String(window.location.hostname || "").toLowerCase();
+  if (h === "taeen-quality-frontend.onrender.com") {
+    return "https://taeen-quality-platform.onrender.com";
+  }
+  return "";
+}
+
+const fromEnv = normalizeBase(import.meta.env.VITE_API_BASE_URL);
+
+export const API_BASE_URL = fromEnv || storageApiBase() || inferProductionApiBase();
 
 /**
  * @param {string} path - Absolute path starting with `/` or full `http(s)://`, `blob:`, `data:` URL.
