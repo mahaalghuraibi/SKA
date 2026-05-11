@@ -1,3 +1,5 @@
+import { apiUrl } from "../config/apiBase.js";
+
 /** Coerce a raw value to a positive integer >= 1 (used for quantities). */
 export function positiveIntQuantity(raw) {
   const n = Math.floor(Number(raw));
@@ -28,14 +30,17 @@ export function isRenderableImageSrc(src) {
     s.startsWith("https://") ||
     s.startsWith("blob:") ||
     s.startsWith("data:") ||
-    s.startsWith("/api/")
+    s.startsWith("/api/") ||
+    s.includes("/api/v1/dishes/files/")
   );
 }
 
 /** Resolve the best thumbnail src from a dish record object. */
 export function dishRecordThumbSrc(record) {
   if (record.localPreviewUrl) return record.localPreviewUrl;
-  const u = record.imageUrl || record.imageDataUrl || "";
+  let u = record.imageUrl || record.imageDataUrl || "";
+  u = String(u).trim();
+  if (u.startsWith("/api/")) u = apiUrl(u);
   if (isRenderableImageSrc(u)) return u.trim();
   return "";
 }

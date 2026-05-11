@@ -1,8 +1,9 @@
 import { normalizeConfidenceRatio, rawConfidenceFromSuggestion } from "../utils/confidence.js";
+import { apiUrl } from "../config/apiBase.js";
 
 export const UNKNOWN_DISH_TEXT = "طبق غير محدد";
 
-const DETECT_DISH_URL = "/api/v1/detect-dish";
+const DETECT_DISH_URL = apiUrl("/api/v1/detect-dish");
 
 /**
  * Map detect-dish JSON body to the normalized shape consumed by the staff dish UI.

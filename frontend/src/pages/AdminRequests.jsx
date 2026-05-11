@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 import { ACCESS_TOKEN_KEY } from "../constants.js";
 import SKALogo from "../components/SKALogo.jsx";
 import { PUBLIC_PAGE_TITLES } from "../constants/branding.js";
+import { apiUrl } from "../config/apiBase.js";
 
-const ADMIN_REQUESTS_URL = "/api/v1/admin-requests";
+const ADMIN_REQUESTS_URL = apiUrl("/api/v1/admin-requests");
 
 function downloadUtf8Csv(filename, headerRow, rows) {
   const esc = (v) => {

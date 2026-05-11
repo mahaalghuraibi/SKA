@@ -3,9 +3,10 @@ import { Link } from "react-router-dom";
 import { ACCESS_TOKEN_KEY } from "../constants.js";
 import SKALogo from "../components/SKALogo.jsx";
 import { PUBLIC_PAGE_TITLES } from "../constants/branding.js";
+import { apiUrl } from "../config/apiBase.js";
 
-const USERS_URL = "/api/v1/users";
-const ADMIN_CREATE_URL = "/api/v1/users/admin-create";
+const USERS_URL = apiUrl("/api/v1/users");
+const ADMIN_CREATE_URL = apiUrl("/api/v1/users/admin-create");
 
 export default function AdminUsersPage() {
   const token = localStorage.getItem(ACCESS_TOKEN_KEY) || "";

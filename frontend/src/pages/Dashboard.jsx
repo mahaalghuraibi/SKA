@@ -3,6 +3,7 @@ import AOS from "aos";
 import "aos/dist/aos.css";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS } from "../constants.js";
+import { apiUrl } from "../config/apiBase.js";
 import { dishSaveErrorMessage } from "../utils/apiError.js";
 import { formatConfidencePercentDisplay } from "../utils/confidence.js";
 import { useDetectDish } from "../hooks/useDetectDish.js";
@@ -88,7 +89,9 @@ import {
 /** Merge API `avatar_url` / `avatar_data_url` for UI + `<img src>`. */
 function normalizeStaffMeUser(body) {
   if (!body || typeof body !== "object") return body;
-  const avatar = body.avatar_url ?? body.avatar_data_url ?? null;
+  const rawAvatar = body.avatar_url ?? body.avatar_data_url ?? null;
+  const avatar =
+    typeof rawAvatar === "string" && rawAvatar.startsWith("/api/") ? apiUrl(rawAvatar) : rawAvatar;
   const email = String(body.email || "").trim().toLowerCase();
   const local = email.includes("@") ? email.split("@")[0].trim() : "";
   const username = String(body.username || "").trim().toLowerCase() || local;
@@ -402,8 +405,8 @@ function isValidYmdDate(text) {
 /** Dish photos stored as data URLs in DB; under backend `_MAX_DISH_IMAGE_URL_LEN` */
 const DISH_IMAGE_DATA_URL_MAX_CHARS = 5_800_000;
 
-const SUPERVISOR_REVIEWS_URL = "/api/v1/supervisor/reviews";
-const SUPERVISOR_CAMERAS_URL = "/api/v1/supervisor/cameras";
+const SUPERVISOR_REVIEWS_URL = apiUrl("/api/v1/supervisor/reviews");
+const SUPERVISOR_CAMERAS_URL = apiUrl("/api/v1/supervisor/cameras");
 
 function protectedApiErrorText(status, detail) {
   if (status === 401) return "انتهت الجلسة، يرجى تسجيل الدخول مرة أخرى";
@@ -412,11 +415,11 @@ function protectedApiErrorText(status, detail) {
   return "تعذر تحميل البيانات.";
 }
 
-const SUPERVISOR_ALERTS_URL = "/api/v1/supervisor/alerts";
-const MONITORING_ANALYZE_URL = "/api/v1/monitoring/analyze-frame";
+const SUPERVISOR_ALERTS_URL = apiUrl("/api/v1/supervisor/alerts");
+const MONITORING_ANALYZE_URL = apiUrl("/api/v1/monitoring/analyze-frame");
 const DISH_REVIEW_UPDATED_EVENT = "ska:dish-review-updated";
-const SUPERVISOR_SUMMARY_URL = "/api/v1/supervisor/summary";
-const SUPERVISOR_EMPLOYEES_URL = "/api/v1/supervisor/employees";
+const SUPERVISOR_SUMMARY_URL = apiUrl("/api/v1/supervisor/summary");
+const SUPERVISOR_EMPLOYEES_URL = apiUrl("/api/v1/supervisor/employees");
 function positiveIntQuantity(raw) {
   const n = Math.floor(Number(raw));
   if (!Number.isFinite(n) || n < 1) return 1;
@@ -4998,7 +5001,7 @@ export default function Dashboard() {
                     return (
                       <article key={r.id} className="rounded-2xl border border-white/10 bg-[#060d1f]/85 p-4 shadow-glass sm:p-5">
                         <div className="flex flex-col gap-5 lg:flex-row lg:items-stretch">
-                          <FoodImageThumb src={r.image_url} alt={r.confirmed_label || r.predicted_label || "dish"} sizeClass="h-32 w-32 shrink-0 rounded-xl sm:h-36 sm:w-36" />
+                          <FoodImageThumb src={apiUrl(r.image_url)} alt={r.confirmed_label || r.predicted_label || "dish"} sizeClass="h-32 w-32 shrink-0 rounded-xl sm:h-36 sm:w-36" />
                           <div className="min-w-0 flex-1 space-y-3">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${badge}`}>

@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import AOS from "aos";
 import "aos/dist/aos.css";
 import { Link, useNavigate } from "react-router-dom";
+import { apiUrl } from "../config/apiBase.js";
 import SKALogo from "../components/SKALogo.jsx";
 import { PLATFORM_BRAND, PUBLIC_PAGE_TITLES } from "../constants/branding.js";
 
-const REGISTER_URL = "/api/v1/auth/users";
+const REGISTER_URL = apiUrl("/api/v1/auth/users");
 const BRANCH_OPTIONS = [
   { id: 1, name: "فرع تجريبي" },
   { id: 2, name: "فرع الرياض" },

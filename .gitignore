@@ -25,6 +25,8 @@ __pycache__/
 ## Local environment and secrets (never commit real keys)
 .env
 .env.*
+!.env.example
+!**/.env.example
 *.env
 backend/.env
 

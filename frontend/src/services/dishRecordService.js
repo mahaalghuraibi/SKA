@@ -1,4 +1,6 @@
-const DISHES_URL = "/api/v1/dishes";
+import { apiUrl } from "../config/apiBase.js";
+
+const DISHES_URL = apiUrl("/api/v1/dishes");
 
 /**
  * Build the POST body for creating a staff dish record.

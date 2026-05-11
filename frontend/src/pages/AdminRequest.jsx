@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import SKALogo from "../components/SKALogo.jsx";
 import { PUBLIC_PAGE_TITLES } from "../constants/branding.js";
+import { apiUrl } from "../config/apiBase.js";
 
-const ADMIN_REQUEST_URL = "/api/v1/admin-requests";
+const ADMIN_REQUEST_URL = apiUrl("/api/v1/admin-requests");
 
 export default function AdminRequestPage() {
   useEffect(() => {

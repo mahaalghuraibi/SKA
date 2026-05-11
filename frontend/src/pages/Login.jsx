@@ -3,10 +3,11 @@ import AOS from "aos";
 import "aos/dist/aos.css";
 import { Link, useNavigate } from "react-router-dom";
 import { ACCESS_TOKEN_KEY, CURRENT_USER_ME_URLS, USER_INFO_KEY, USER_ROLE_KEY } from "../constants.js";
+import { apiUrl } from "../config/apiBase.js";
 import SKALogo from "../components/SKALogo.jsx";
 import { PLATFORM_BRAND, PUBLIC_PAGE_TITLES } from "../constants/branding.js";
 
-const LOGIN_URL = "/api/v1/auth/login";
+const LOGIN_URL = apiUrl("/api/v1/auth/login");
 
 function MailIcon({ className }) {
   return (
